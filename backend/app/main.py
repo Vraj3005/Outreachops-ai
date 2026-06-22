@@ -1,3 +1,21 @@
+import base64
+import os
+
+# Auto-decode base64 credentials from environment variables on startup
+for env_name, file_path in [
+    ("GMAIL_CREDENTIALS_B64", "gmail_credentials.json"),
+    ("GMAIL_TOKEN_B64", "gmail_token.pkl"),
+    ("SHEETS_CREDENTIALS_B64", "sheets_credentials.json")
+]:
+    val = os.getenv(env_name)
+    if val:
+        try:
+            with open(file_path, "wb") as f:
+                f.write(base64.b64decode(val.strip()))
+            print(f"Decoded {env_name} into {file_path}")
+        except Exception as e:
+            print(f"Failed to write {file_path} from {env_name}: {e}")
+
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
