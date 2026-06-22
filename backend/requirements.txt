@@ -1,0 +1,12 @@
+fastapi>=0.100.0
+uvicorn>=0.22.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+google-genai>=0.1.0
+gspread>=5.10.0
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.90.0
+supabase>=1.0.0
+python-multipart>=0.0.6
+pytest>=7.0.0
+pytest-mock>=3.0.0

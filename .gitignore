@@ -1,0 +1,55 @@
+# System Files
+.DS_Store
+Thumbs.db
+
+# Environments & Secret Files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.env
+sheets_credentials.json
+gmail_credentials.json
+gmail_token.pkl
+*.pkl
+*.json
+!package.json
+!tsconfig.json
+!next.config.js
+!next.config.mjs
+!postcss.config.js
+!tailwind.config.js
+!tailwind.config.ts
+!components.json
+local_outreachops.db
+*.db
+*.sqlite
+*.sqlite3
+prod_secrets_base64.txt
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv
+venv/
+ENV/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node (Frontend)
+node_modules/
+.next/
+out/
+build/
+dist/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Docker
+.dockerignore
