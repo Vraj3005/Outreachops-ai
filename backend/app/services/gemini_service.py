@@ -250,3 +250,114 @@ class GeminiService:
             "Signature: {signature}\n\n"
             "Write one email that highlights these details."
         )
+
+    def generate_structured_email(self, prompt: str, user_id: str = None) -> dict[str, Any]:
+        """
+        Generates email content, requesting a structured JSON response.
+        Falls back to parsing / validating if the model returns malformed JSON.
+        """
+        json_prompt = (
+            prompt + 
+            "\n\nCRITICAL: You must output a valid JSON object matching this schema. Do not include markdown formatting like ```json or anything else. Just the raw JSON object:\n"
+            "{\n"
+            "  \"subject\": \"string (3-5 words subject line)\",\n"
+            "  \"body\": \"string (paragraphs of email body and signature)\",\n"
+            "  \"reasoning\": \"string (brief internal displayed rationale)\",\n"
+            "  \"warnings\": [\"list of strings\"]\n"
+            "}"
+        )
+        
+        if settings.DEMO_MODE and not self.api_key and not user_id:
+            return {
+                "subject": "Operational efficiency improvements",
+                "body": "Hello,\n\n spreadsheets are slow. We recommend custom modules.\n\nBest,\nAdmin",
+                "reasoning": "Demo fallback reasoning",
+                "warnings": [],
+                "model_used": "gemini-mock-demo"
+            }
+            
+        client = self._get_client(user_id)
+        db_cfg = self._get_db_config(user_id) if user_id else {}
+        models_to_try = self.model_list
+        if db_cfg.get("allowed_model"):
+            db_models = [db_cfg["allowed_model"]]
+            if db_cfg.get("fallback_models"):
+                db_models.extend(db_cfg["fallback_models"])
+            models_to_try = db_models
+            
+        last_error = None
+        for model_name in models_to_try:
+            attempt = 0
+            retries = 3
+            delay = 2.0
+            backoff_factor = 2.0
+            
+            while attempt < retries:
+                try:
+                    from google.genai import types
+                    config = types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.2
+                    )
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=json_prompt,
+                        config=config
+                    )
+                    raw_text = getattr(response, "text", "").strip()
+                    if not raw_text:
+                        raise ValueError("Empty response text")
+                        
+                    import json
+                    parsed_json = json.loads(raw_text)
+                    
+                    return {
+                        "subject": parsed_json.get("subject", "Quick thought"),
+                        "body": parsed_json.get("body", raw_text),
+                        "reasoning": parsed_json.get("reasoning", ""),
+                        "warnings": parsed_json.get("warnings", []),
+                        "model_used": model_name
+                    }
+                except Exception as e:
+                    last_error = e
+                    try:
+                        response_fallback = client.models.generate_content(
+                            model=model_name,
+                            contents=prompt
+                        )
+                        fallback_text = getattr(response_fallback, "text", "").strip()
+                        if fallback_text:
+                            try:
+                                import json
+                                clean_text = fallback_text
+                                if "```json" in clean_text:
+                                    clean_text = clean_text.split("```json", 1)[1].split("```", 1)[0].strip()
+                                elif "```" in clean_text:
+                                    clean_text = clean_text.split("```", 1)[1].split("```", 1)[0].strip()
+                                parsed_json = json.loads(clean_text)
+                                return {
+                                    "subject": parsed_json.get("subject", "Quick thought"),
+                                    "body": parsed_json.get("body", clean_text),
+                                    "reasoning": parsed_json.get("reasoning", ""),
+                                    "warnings": parsed_json.get("warnings", []),
+                                    "model_used": model_name
+                                }
+                            except Exception:
+                                parsed = self.parse_email(fallback_text)
+                                return {
+                                    "subject": parsed["subject"],
+                                    "body": parsed["body"],
+                                    "reasoning": "Parsed from unstructured text output",
+                                    "warnings": [],
+                                    "model_used": model_name
+                                }
+                    except Exception as e2:
+                        last_error = e2
+                        
+                    time.sleep(delay)
+                    delay *= backoff_factor
+                    attempt += 1
+                    
+        raise GeminiQuotaError(
+            message=f"Gemini generation exhausted all configured models. Last exception: {last_error}"
+        )

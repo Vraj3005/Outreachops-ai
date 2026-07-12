@@ -693,6 +693,10 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "campaigns", "language", "TEXT", "'en'")
         self._add_column_if_missing(cursor, "campaigns", "start_date", "TEXT")
         self._add_column_if_missing(cursor, "campaigns", "prompt_config_snapshot", "TEXT", "'{}'")
+        self._add_column_if_missing(cursor, "campaigns", "min_quality_score", "REAL", "0.7")
+        self._add_column_if_missing(cursor, "campaigns", "min_spam_risk", "REAL", "0.4")
+        self._add_column_if_missing(cursor, "campaigns", "min_personalization", "REAL", "0.6")
+        self._add_column_if_missing(cursor, "campaigns", "min_clarity", "REAL", "0.7")
 
         # Alter Leads Table
         self._add_column_if_missing(cursor, "leads", "first_name", "TEXT")
@@ -711,6 +715,12 @@ class SQLiteSupabaseClient:
             cursor, "leads", "research_status", "TEXT", "'unchecked'"
         )
         self._add_column_if_missing(cursor, "leads", "source_id", "TEXT")
+
+        # Alter Prompt Versions Table
+        self._add_column_if_missing(cursor, "prompt_versions", "status", "TEXT", "'published'")
+        self._add_column_if_missing(cursor, "prompt_versions", "description", "TEXT")
+        self._add_column_if_missing(cursor, "prompt_versions", "changelog", "TEXT")
+        self._add_column_if_missing(cursor, "prompt_versions", "updated_at", "TEXT")
 
         # Alter Owner Settings Table
         self._add_column_if_missing(cursor, "owner_settings", "offer_description", "TEXT")
