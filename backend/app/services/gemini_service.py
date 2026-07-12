@@ -1,33 +1,57 @@
-import time
 import logging
-from typing import Dict, Any, List, Optional
+import time
+from typing import Any
+
 from google import genai
+
 from app.config import settings
 from app.services.error_service import GeminiQuotaError
 
 logger = logging.getLogger("outreachops.services.gemini")
+
 
 class GeminiService:
     """
     AI Generation Service for personalizing email pitches.
     Implements structured retries and ordered model fallbacks.
     """
+
     def __init__(self):
         self.api_key = settings.GEMINI_API_KEY
         self.model_list = settings.gemini_models
 
-    def _get_client(self) -> genai.Client:
-        if not self.api_key:
+    def _get_db_config(self, user_id: str) -> dict[str, Any]:
+        from app.utils.crypto import decrypt_val
+        import json
+        if not user_id:
+            return {}
+        try:
+            res = supabase.table("integration_connections").select("*").eq("user_id", user_id).eq("provider", "gemini").execute()
+            if res.data and res.data[0].get("connection_status") == "connected":
+                creds_str = decrypt_val(res.data[0].get("encrypted_credentials"))
+                if creds_str:
+                    return json.loads(creds_str)
+        except Exception as e:
+            logger.warning(f"Error loading Gemini credentials from DB: {e}")
+        return {}
+
+    def _get_client(self, user_id: str = None) -> genai.Client:
+        db_cfg = self._get_db_config(user_id) if user_id else {}
+        api_key = db_cfg.get("api_key") or self.api_key
+        
+        if not api_key:
             raise GeminiQuotaError(
-                message="Gemini API Key is not configured. Add GEMINI_API_KEY to your environment."
+                message="Gemini API Key is not configured. Add GEMINI_API_KEY to environment or configure it in settings."
             )
         try:
-            return genai.Client(api_key=self.api_key)
+            return genai.Client(api_key=api_key)
         except Exception as e:
             logger.error(f"Failed to initialize Gemini GenAI Client: {e}")
-            raise GeminiQuotaError(message="Could not initialize Gemini Client", details={"error": str(e)})
+            raise GeminiQuotaError(
+                message="Could not initialize Gemini Client", details={"error": str(e)}
+            )
 
-    def parse_email(self, raw_text: str) -> Dict[str, str]:
+    def parse_email(self, raw_text: str) -> dict[str, str]:
         """
         Parses SUBJECT: and BODY: tags out of generated Gemini text.
         Ref: parse_email() lines 286-304 in coldmail_fixed_genai.py
@@ -52,14 +76,20 @@ class GeminiService:
 
         return {"subject": subject, "body": body}
 
-    def generate_email_content(self, prompt: str) -> Dict[str, Any]:
+    def generate_email_content(self, prompt: str, user_id: str = None) -> dict[str, Any]:
         """
         Executes generation over the model fallback list with exponential backoff retries.
         """
-        if settings.DEMO_MODE and not self.api_key:
-            logger.info("Demo Mode active and no GEMINI_API_KEY provided. Returning mock email content.")
+        if settings.DEMO_MODE and not self.api_key and not user_id:
+            logger.info(
+                "Demo Mode active and no GEMINI_API_KEY provided. Returning mock email content."
+            )
             prompt_lower = prompt.lower()
-            if "erp" in prompt_lower or "scheduling" in prompt_lower or "dispatch" in prompt_lower:
+            if (
+                "erp" in prompt_lower
+                or "scheduling" in prompt_lower
+                or "dispatch" in prompt_lower
+            ):
                 subject = "Operational efficiency suggestions"
                 body = (
                     "Hi there,\n\nI was looking at your construction operations and noticed that managing "
@@ -80,52 +110,71 @@ class GeminiService:
                 "body": body,
                 "model_used": "gemini-mock-demo",
                 "raw_output": f"SUBJECT: {subject}\nBODY:\n{body}",
-                "error": None
+                "error": None,
             }
 
-        client = self._get_client()
+        client = self._get_client(user_id)
+        db_cfg = self._get_db_config(user_id) if user_id else {}
+        
+        models_to_try = self.model_list
+        if db_cfg.get("allowed_model"):
+            db_models = [db_cfg["allowed_model"]]
+            if db_cfg.get("fallback_models"):
+                db_models.extend(db_cfg["fallback_models"])
+            models_to_try = db_models
+            
         last_error = None
 
-        for model_name in self.model_list:
+        for model_name in models_to_try:
+
             def api_call():
-                return client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
+                return client.models.generate_content(model=model_name, contents=prompt)
 
             # Retry with exponential backoff helper
             attempt = 0
             retries = 3
             delay = 2.0
             backoff_factor = 2.0
-            
+
             while attempt < retries:
                 try:
-                    logger.info(f"Attempting email generation with model: {model_name} (Attempt {attempt+1}/{retries})")
+                    logger.info(
+                        f"Attempting email generation with model: {model_name} (Attempt {attempt+1}/{retries})"
+                    )
                     response = api_call()
                     raw_text = getattr(response, "text", "")
                     if not raw_text:
                         raise ValueError("Gemini returned an empty text payload")
-                        
+
                     parsed = self.parse_email(raw_text)
                     return {
                         "subject": parsed["subject"],
                         "body": parsed["body"],
                         "model_used": model_name,
                         "raw_output": raw_text,
-                        "error": None
+                        "error": None,
                     }
                 except Exception as e:
                     last_error = e
                     err_str = str(e).lower()
                     # Check if error is retryable (429 Rate Limit, 503 Overloaded)
-                    is_transient = "429" in err_str or "503" in err_str or "quota" in err_str or "exhausted" in err_str or "overloaded" in err_str
-                    
+                    is_transient = (
+                        "429" in err_str
+                        or "503" in err_str
+                        or "quota" in err_str
+                        or "exhausted" in err_str
+                        or "overloaded" in err_str
+                    )
+
                     if not is_transient or attempt == retries - 1:
-                        logger.error(f"Non-retryable model failure for {model_name}: {e}")
+                        logger.error(
+                            f"Non-retryable model failure for {model_name}: {e}"
+                        )
                         break
-                    
-                    logger.warning(f"Transient error encountered, retrying model {model_name} in {delay}s: {e}")
+
+                    logger.warning(
+                        f"Transient error encountered, retrying model {model_name} in {delay}s: {e}"
+                    )
                     time.sleep(delay)
                     delay *= backoff_factor
                     attempt += 1
@@ -135,7 +184,7 @@ class GeminiService:
         logger.error(err_msg)
         raise GeminiQuotaError(
             message="Gemini quota exceeded or service unavailable across all models.",
-            details={"last_error": str(last_error)}
+            details={"last_error": str(last_error)},
         )
 
     def generate_prompt_text(self, prompt: str) -> str:
@@ -157,20 +206,20 @@ class GeminiService:
         last_error = None
 
         for model_name in self.model_list:
+
             def api_call():
-                return client.models.generate_content(
-                    model=model_name,
-                    contents=prompt
-                )
+                return client.models.generate_content(model=model_name, contents=prompt)
 
             attempt = 0
             retries = 3
             delay = 2.0
             backoff_factor = 2.0
-            
+
             while attempt < retries:
                 try:
-                    logger.info(f"Attempting prompt text generation with model: {model_name} (Attempt {attempt+1})")
+                    logger.info(
+                        f"Attempting prompt text generation with model: {model_name} (Attempt {attempt+1})"
+                    )
                     response = api_call()
                     raw_text = getattr(response, "text", "")
                     if not raw_text:
@@ -179,7 +228,13 @@ class GeminiService:
                 except Exception as e:
                     last_error = e
                     err_str = str(e).lower()
-                    is_transient = "429" in err_str or "503" in err_str or "quota" in err_str or "exhausted" in err_str or "overloaded" in err_str
+                    is_transient = (
+                        "429" in err_str
+                        or "503" in err_str
+                        or "quota" in err_str
+                        or "exhausted" in err_str
+                        or "overloaded" in err_str
+                    )
                     if not is_transient or attempt == retries - 1:
                         break
                     time.sleep(delay)

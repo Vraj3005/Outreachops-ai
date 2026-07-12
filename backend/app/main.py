@@ -5,7 +5,7 @@ import os
 for env_name, file_path in [
     ("GMAIL_CREDENTIALS_B64", "gmail_credentials.json"),
     ("GMAIL_TOKEN_B64", "gmail_token.pkl"),
-    ("SHEETS_CREDENTIALS_B64", "sheets_credentials.json")
+    ("SHEETS_CREDENTIALS_B64", "sheets_credentials.json"),
 ]:
     val = os.getenv(env_name)
     if val:
@@ -17,12 +17,27 @@ for env_name, file_path in [
             print(f"Failed to write {file_path} from {env_name}: {e}")
 
 from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from app.config import settings
+
 from app.database import init_db
-from app.routes import health, leads, drafts, logs, analytics, integrations, prompts, campaigns, do_not_contact, emails
+from app.routes import (
+    analytics,
+    campaigns,
+    do_not_contact,
+    drafts,
+    emails,
+    health,
+    integrations,
+    leads,
+    logs,
+    prompts,
+    imports,
+    settings as settings_route,
+)
 from app.services.error_service import register_error_handlers
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -31,11 +46,12 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown actions (if any)
 
+
 app = FastAPI(
     title="OutreachOps AI API",
     description="Production-grade cold email automation API with Google Sheets sync, Gemini analysis, and Gmail OAuth",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
 )
 
 # Register custom exception handler middleware
@@ -61,7 +77,8 @@ app.include_router(prompts.router, prefix="/api/v1")
 app.include_router(campaigns.router, prefix="/api/v1")
 app.include_router(do_not_contact.router, prefix="/api/v1")
 app.include_router(emails.router, prefix="/api/v1")
-
+app.include_router(imports.router, prefix="/api/v1")
+app.include_router(settings_route.router, prefix="/api/v1")
 
 
 @app.get("/")

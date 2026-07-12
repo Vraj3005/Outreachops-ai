@@ -383,7 +383,7 @@ export default function PromptStudioPage() {
               {!testResult && !isTesting ? (
                 <div className="h-96 rounded-lg bg-zinc-50 border border-zinc-200 flex flex-col items-center justify-center p-6 text-center text-zinc-400">
                   <FileText className="w-8 h-8 mb-2 text-zinc-300" />
-                  <span className="text-xs font-semibold">Click "Run Simulation" to render Gemini generated email drafts.</span>
+                  <span className="text-xs font-semibold">{"Click \"Run Simulation\" to render Gemini generated email drafts."}</span>
                 </div>
               ) : isTesting ? (
                 <div className="h-96 rounded-lg bg-zinc-50 border border-zinc-200 flex flex-col items-center justify-center p-6 text-center text-indigo-600">

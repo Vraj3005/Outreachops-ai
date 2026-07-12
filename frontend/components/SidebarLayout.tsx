@@ -7,6 +7,7 @@ import {
   Settings, Database, Mail, LogOut, Code, Send
 } from "lucide-react";
 import { useToast } from "./Toast";
+import { supabase } from "@/lib/supabase";
 
 interface SidebarLayoutProps {
   children: React.ReactNode;
@@ -17,16 +18,45 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const router = useRouter();
   const { toast } = useToast();
 
+  const [checkingAuth, setCheckingAuth] = React.useState(true);
+  const [userEmail, setUserEmail] = React.useState("yash69699696@gmail.com");
   const [gmailStatus, setGmailStatus] = React.useState("checking");
   const [sheetsStatus, setSheetsStatus] = React.useState("checking");
   const [geminiStatus, setGeminiStatus] = React.useState("checking");
   const [dbStatus, setDbStatus] = React.useState("checking");
 
   React.useEffect(() => {
-    const checkDiagnostics = async () => {
+    const checkAuthAndDiagnostics = async () => {
+      // 1. Secure Layout Route Protection
+      if (supabase) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (!session) {
+            router.push("/");
+            return;
+          }
+          const email = session.user?.email || "";
+          const ownerEmail = process.env.NEXT_PUBLIC_OWNER_EMAIL || "yash69699696@gmail.com";
+          
+          if (email.toLowerCase() !== ownerEmail.toLowerCase()) {
+            toast("Access denied: You are not the authorized owner of this workspace.", "error");
+            await supabase.auth.signOut();
+            router.push("/");
+            return;
+          }
+          setUserEmail(email);
+        } catch (e) {
+          console.error("Owner validation exception: ", e);
+          router.push("/");
+          return;
+        }
+      }
+      setCheckingAuth(false);
+
+      // 2. Load Diagnostics status indicators
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
       
-      // 1. Gmail status
+      // Gmail status
       try {
         const res = await fetch(`${API_URL}/api/v1/integrations/gmail/status`);
         if (res.ok) {
@@ -39,7 +69,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         setGmailStatus("failed");
       }
 
-      // 2. Sheets status
+      // Sheets status
       try {
         const res = await fetch(`${API_URL}/api/v1/integrations/sheets/status`);
         if (res.ok) {
@@ -52,7 +82,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         setSheetsStatus("failed");
       }
 
-      // 3. Gemini status
+      // Gemini status
       try {
         const res = await fetch(`${API_URL}/api/v1/integrations/gemini/status`);
         if (res.ok) {
@@ -65,7 +95,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         setGeminiStatus("failed");
       }
 
-      // 4. Database health
+      // Database health
       try {
         const res = await fetch(`${API_URL}/api/v1/health`);
         if (res.ok) {
@@ -79,8 +109,8 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       }
     };
 
-    checkDiagnostics();
-  }, []);
+    checkAuthAndDiagnostics();
+  }, [router, toast]);
 
   const navItems = [
     { name: "Dashboard", path: "/dashboard", icon: BarChart3 },
@@ -93,7 +123,10 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     { name: "Settings", path: "/settings", icon: Settings },
   ];
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (supabase) {
+      await supabase.auth.signOut();
+    }
     toast("Logged out successfully", "info");
     router.push("/");
   };
@@ -128,6 +161,17 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     }
   };
 
+  if (checkingAuth) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center font-sans">
+        <div className="flex flex-col items-center gap-3 text-indigo-600">
+          <RefreshCw className="w-8 h-8 animate-spin" />
+          <span className="text-xs font-semibold text-zinc-600">Verifying secure owner session...</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-zinc-50/50 text-zinc-950 flex font-sans">
       {/* Navigation Sidebar */}
@@ -148,13 +192,13 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
               const Icon = item.icon;
               return (
                 <button
-                  key={item.path}
-                  onClick={() => router.push(item.path)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-xs transition-all ${
-                    isActive 
-                      ? "bg-zinc-100 text-zinc-900 font-semibold border border-zinc-200/50 shadow-sm" 
-                      : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50/80"
-                  }`}
+                   key={item.path}
+                   onClick={() => router.push(item.path)}
+                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-xs transition-all ${
+                     isActive 
+                       ? "bg-zinc-100 text-zinc-900 font-semibold border border-zinc-200/50 shadow-sm" 
+                       : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50/80"
+                   }`}
                 >
                   <Icon className={`w-4 h-4 ${isActive ? "text-zinc-900" : "text-zinc-400"}`} />
                   {item.name}
@@ -168,7 +212,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         <div className="space-y-3">
           <div className="p-3 rounded-lg bg-zinc-50 border border-zinc-200/80 text-[10px]">
             <div className="text-zinc-400 font-semibold mb-1 uppercase tracking-wider">Account profile</div>
-            <div className="font-bold text-zinc-700 truncate">vraj@pitbullcorporations.com</div>
+            <div className="font-bold text-zinc-700 truncate">{userEmail}</div>
           </div>
           
           <button 
@@ -210,8 +254,13 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             </div>
           </div>
           
-          <div className="text-[10px] text-zinc-500 font-medium">
-            Tenant: Pitbull Corporations
+          <div className="text-[10px] font-medium flex items-center gap-2">
+            {!supabase && (
+              <span className="px-2 py-0.5 rounded-full bg-amber-500 text-white font-bold animate-pulse text-[9px]">
+                DEMO MODE
+              </span>
+            )}
+            <span className="text-zinc-500">Tenant: Pitbull Corporations</span>
           </div>
         </header>
 

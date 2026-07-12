@@ -8,9 +8,9 @@ import { supabase } from "@/lib/supabase";
 
 export default function AuthPage() {
   const [isSignUp, setIsSignUp] = useState(false);
-  const [email, setEmail] = useState("vraj@pitbullcorporations.com");
-  const [password, setPassword] = useState("password123");
-  const [name, setName] = useState("Vraj");
+  const [email, setEmail] = useState("yash69699696@gmail.com");
+  const [password, setPassword] = useState("5m1ajabfhc");
+  const [name, setName] = useState("Yash");
   const [loading, setLoading] = useState(false);
   const [isLocalMode, setIsLocalMode] = useState(true);
 

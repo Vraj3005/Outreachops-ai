@@ -4,13 +4,18 @@ import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import SidebarLayout from "@/components/SidebarLayout";
 import { useToast } from "@/components/Toast";
+import ImportWizardModal from "@/components/ImportWizardModal";
 import { 
   Plus, FileSpreadsheet, Search, Sparkles, Filter, 
-  Trash2, Mail, ExternalLink, RefreshCw, X, CheckSquare, Square, AlertCircle, Edit3
+  Trash2, Mail, ExternalLink, RefreshCw, X, CheckSquare, Square, 
+  AlertCircle, Edit3, Settings, Eye, HelpCircle, Download, Archive, Check
 } from "lucide-react";
 
 interface Lead {
   id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  full_name?: string | null;
   company_name: string | null;
   website: string;
   industry: string | null;
@@ -18,31 +23,99 @@ interface Lead {
   city: string | null;
   contact_email: string | null;
   phone: string | null;
-  website_pain_points: string | null;
-  erp_approach: string | null;
+  job_title?: string | null;
   lead_status: string;
-  source_sheet_name: string | null;
-  source_row_number: string | null;
+  tags?: string[] | null;
+  custom_fields?: Record<string, any> | null;
+  fit_score?: number | null;
+  fit_score_reasons?: string[] | null;
+  email_validation_status?: string | null;
+  created_at: string;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 export default function LeadsPage() {
+  const { toast } = useToast();
+  const router = useRouter();
+
+  // Core Data States
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loadingLeads, setLoadingLeads] = useState(true);
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+
+  // Selection states
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // Search & Filters
   const [searchTerm, setSearchTerm] = useState("");
-  
   const [industryFilter, setIndustryFilter] = useState("all");
   const [countryFilter, setCountryFilter] = useState("all");
   const [emailFilter, setEmailFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
-  
-  const [isIngesting, setIsIngesting] = useState(false);
-  const [showAddModal, setShowAddModal] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [validationFilter, setValidationFilter] = useState("all");
 
-  // Bulk Generation Wizard state
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
+  // Modals Toggles
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [showImportWizard, setShowImportWizard] = useState(false);
+  const [wizardSourceType, setWizardSourceType] = useState<"file" | "sheets">("file");
   const [showGenModal, setShowGenModal] = useState(false);
+
+  // Column Visibility Configurator
+  const [showColumnConfig, setShowColumnConfig] = useState(false);
+  const [visibleColumns, setVisibleColumns] = useState<string[]>([
+    "company_name", "website", "industry", "location", "email", "fit_score", "email_validation_status", "tags", "lead_status"
+  ]);
+
+  // Fit score details modal
+  const [fitScoreLead, setFitScoreLead] = useState<Lead | null>(null);
+
+  // Custom fields viewer drawer
+  const [customFieldsLead, setCustomFieldsLead] = useState<Lead | null>(null);
+
+  // Bulk tag input states
+  const [bulkTagInput, setBulkTagInput] = useState("");
+  const [showBulkTagModal, setShowBulkTagModal] = useState(false);
+  const [bulkActionType, setBulkActionType] = useState<"add" | "remove">("add");
+
+  // Bulk enroll states
+  const [showBulkEnrollModal, setShowBulkEnrollModal] = useState(false);
+  const [selectedCampaignId, setSelectedCampaignId] = useState("");
+
+  // Add Lead Form State
+  const [newCompany, setNewCompany] = useState("");
+  const [newWebsite, setNewWebsite] = useState("");
+  const [newFirstName, setNewFirstName] = useState("");
+  const [newLastName, setNewLastName] = useState("");
+  const [newJobTitle, setNewJobTitle] = useState("");
+  const [newIndustry, setNewIndustry] = useState("Construction");
+  const [newCountry, setNewCountry] = useState("USA");
+  const [newCity, setNewCity] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newPhone, setNewPhone] = useState("");
+  const [newTags, setNewTags] = useState("");
+
+  // Edit Lead Form State
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
+  const [editCompany, setEditCompany] = useState("");
+  const [editWebsite, setEditWebsite] = useState("");
+  const [editFirstName, setEditFirstName] = useState("");
+  const [editLastName, setEditLastName] = useState("");
+  const [editJobTitle, setEditJobTitle] = useState("");
+  const [editIndustry, setEditIndustry] = useState("");
+  const [editCountry, setEditCountry] = useState("");
+  const [editCity, setEditCity] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editStatus, setEditStatus] = useState("Pending");
+  const [editTags, setEditTags] = useState("");
+
+  // Email generation wizard states
   const [isGenerating, setIsGenerating] = useState(false);
   const [genType, setGenType] = useState<"website" | "erp" | "both">("both");
   const [genRegenerate, setGenRegenerate] = useState(true);
@@ -51,125 +124,21 @@ export default function LeadsPage() {
   const [genFailures, setGenFailures] = useState<{ company: string; error: string }[]>([]);
   const [generateForAll, setGenerateForAll] = useState(false);
 
-  // Add Lead Form State
-  const [newCompany, setNewCompany] = useState("");
-  const [newWebsite, setNewWebsite] = useState("");
-  const [newIndustry, setNewIndustry] = useState("Construction");
-  const [newCountry, setNewCountry] = useState("USA");
-  const [newEmail, setNewEmail] = useState("");
-  const [newErp, setNewErp] = useState("");
-
-  // Edit Lead Form State
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingLeadId, setEditingLeadId] = useState<string | null>(null);
-  const [editCompany, setEditCompany] = useState("");
-  const [editWebsite, setEditWebsite] = useState("");
-  const [editIndustry, setEditIndustry] = useState("");
-  const [editCountry, setEditCountry] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [editErp, setEditErp] = useState("");
-  const [editStatus, setEditStatus] = useState("Pending");
-
-  const handleEditClick = (lead: Lead) => {
-    setEditingLeadId(lead.id);
-    setEditCompany(lead.company_name || "");
-    setEditWebsite(lead.website || "");
-    setEditIndustry(lead.industry || "");
-    setEditCountry(lead.country || "");
-    setEditEmail(lead.contact_email || "");
-    setEditErp(lead.erp_approach || "");
-    setEditStatus(lead.lead_status || "Pending");
-    setShowEditModal(true);
-  };
-
-  const handleEditSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingLeadId) return;
-
-    try {
-      const res = await fetch(`${API_URL}/api/v1/leads/${editingLeadId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          company_name: editCompany,
-          website: editWebsite,
-          industry: editIndustry,
-          country: editCountry,
-          contact_email: editEmail,
-          erp_approach: editErp,
-          lead_status: editStatus
-        })
-      });
-
-      if (res.ok) {
-        toast("Lead updated successfully");
-        setShowEditModal(false);
-        fetchLeads();
-      } else {
-        const err = await res.json();
-        toast(err.message || "Failed to update lead", "error");
+  // Fetch campaigns
+  useEffect(() => {
+    const fetchCampaigns = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/v1/campaigns`);
+        if (res.ok) {
+          const data = await res.json();
+          setCampaigns(data);
+        }
+      } catch (e) {
+        console.error("Failed to load campaigns list:", e);
       }
-    } catch (e) {
-      console.error(e);
-      toast("Error updating lead", "error");
-    }
-  };
-
-  const handleToggleLeadStatus = async (id: string, currentStatus: string) => {
-    const nextStatus = currentStatus === "Approved" ? "Pending" : "Approved";
-    try {
-      const res = await fetch(`${API_URL}/api/v1/leads/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ lead_status: nextStatus })
-      });
-      if (res.ok) {
-        toast(`Lead status set to ${nextStatus}`);
-        setLeads(prev => prev.map(l => l.id === id ? { ...l, lead_status: nextStatus } : l));
-      } else {
-        toast("Failed to update status", "error");
-      }
-    } catch (e) {
-      console.error(e);
-      toast("Error updating status", "error");
-    }
-  };
-
-  const { toast } = useToast();
-  const router = useRouter();
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const formData = new FormData();
-    formData.append("file", file);
-
-    toast("Uploading CSV leads sheet...", "info");
-    try {
-      const res = await fetch(`${API_URL}/api/v1/leads/upload`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (res.ok) {
-        const data = await res.json();
-        toast(`Import Complete! Ingested: ${data.imported}, Duplicates: ${data.skipped_duplicates}`);
-        fetchLeads();
-      } else {
-        const err = await res.json();
-        toast(err.detail || "CSV upload failed", "error");
-      }
-    } catch (e) {
-      console.error(e);
-      toast("CSV upload network error", "error");
-    } finally {
-      if (fileInputRef.current) {
-        fileInputRef.current.value = "";
-      }
-    }
-  };
+    };
+    fetchCampaigns();
+  }, []);
 
   // Load leads from backend
   const fetchLeads = useCallback(async () => {
@@ -194,32 +163,14 @@ export default function LeadsPage() {
     fetchLeads();
   }, [fetchLeads]);
 
-  // Google Sheets import trigger
-  const handleImportSheet = async () => {
-    setIsIngesting(true);
-    toast("Syncing Google Sheets...", "info");
-    try {
-      const res = await fetch(`${API_URL}/api/v1/integrations/sheets/import`, { 
-        method: "POST" 
-      });
-      
-      if (res.ok) {
-        const data = await res.json();
-        toast(`Sync Complete! Ingested: ${data.imported}, Duplicates: ${data.skipped_duplicates}`);
-        fetchLeads();
-      } else {
-        const errorData = await res.json();
-        toast(errorData.message || "Sheets Ingest failed", "error");
-      }
-    } catch (e) {
-      console.error("API Connection Error: ", e);
-      toast("Google Sheets API connection error", "error");
-    } finally {
-      setIsIngesting(false);
-    }
+  // Toggle single column visibility
+  const toggleColumn = (col: string) => {
+    setVisibleColumns(prev => 
+      prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+    );
   };
 
-  // Add Lead manually
+  // Add Lead Submit
   const handleAddLeadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWebsite) {
@@ -234,10 +185,16 @@ export default function LeadsPage() {
         body: JSON.stringify({
           company_name: newCompany || newWebsite.split(".")[0].toUpperCase(),
           website: newWebsite,
+          first_name: newFirstName || null,
+          last_name: newLastName || null,
+          full_name: newFirstName ? `${newFirstName} ${newLastName || ""}`.trim() : null,
+          job_title: newJobTitle || null,
           industry: newIndustry,
           country: newCountry,
-          contact_email: newEmail,
-          erp_approach: newErp,
+          city: newCity || null,
+          contact_email: newEmail || null,
+          phone: newPhone || null,
+          tags: newTags ? newTags.split(",").map(t => t.trim()) : [],
           lead_status: "Pending"
         })
       });
@@ -250,11 +207,16 @@ export default function LeadsPage() {
         // Reset form
         setNewCompany("");
         setNewWebsite("");
-        setNewErp("");
+        setNewFirstName("");
+        setNewLastName("");
+        setNewJobTitle("");
+        setNewCity("");
+        setNewPhone("");
         setNewEmail("");
+        setNewTags("");
       } else {
         const err = await res.json();
-        toast(err.message || "Failed to create lead", "error");
+        toast(err.detail || "Failed to create lead", "error");
       }
     } catch (e) {
       console.error("API Connection Error: ", e);
@@ -262,7 +224,64 @@ export default function LeadsPage() {
     }
   };
 
-  // Bulk delete leads
+  // Edit Lead Submit
+  const handleEditClick = (lead: Lead) => {
+    setEditingLeadId(lead.id);
+    setEditCompany(lead.company_name || "");
+    setEditWebsite(lead.website || "");
+    setEditFirstName(lead.first_name || "");
+    setEditLastName(lead.last_name || "");
+    setEditJobTitle(lead.job_title || "");
+    setEditIndustry(lead.industry || "");
+    setEditCountry(lead.country || "");
+    setEditCity(lead.city || "");
+    setEditEmail(lead.contact_email || "");
+    setEditPhone(lead.phone || "");
+    setEditStatus(lead.lead_status || "Pending");
+    setEditTags(lead.tags ? lead.tags.join(", ") : "");
+    setShowEditModal(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingLeadId) return;
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${editingLeadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          company_name: editCompany,
+          website: editWebsite,
+          first_name: editFirstName || null,
+          last_name: editLastName || null,
+          full_name: editFirstName ? `${editFirstName} ${editLastName || ""}`.trim() : null,
+          job_title: editJobTitle || null,
+          industry: editIndustry,
+          country: editCountry,
+          city: editCity || null,
+          contact_email: editEmail || null,
+          phone: editPhone || null,
+          lead_status: editStatus,
+          tags: editTags ? editTags.split(",").map(t => t.trim()) : []
+        })
+      });
+
+      if (res.ok) {
+        toast("Lead updated successfully");
+        setShowEditModal(false);
+        fetchLeads();
+      } else {
+        const err = await res.json();
+        toast(err.detail || "Failed to update lead", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Error updating lead", "error");
+    }
+  };
+
+  // Delete Lead
   const handleDeleteLead = async (id: string, name: string) => {
     try {
       const res = await fetch(`${API_URL}/api/v1/leads/${id}`, { method: "DELETE" });
@@ -283,7 +302,103 @@ export default function LeadsPage() {
     }
   };
 
-  // Selection handlers
+  // Approve status toggle
+  const handleToggleLeadStatus = async (id: string, currentStatus: string) => {
+    const nextStatus = currentStatus === "Approved" ? "Pending" : "Approved";
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_status: nextStatus })
+      });
+      if (res.ok) {
+        toast(`Lead status set to ${nextStatus}`);
+        setLeads(prev => prev.map(l => l.id === id ? { ...l, lead_status: nextStatus } : l));
+      } else {
+        toast("Failed to update status", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Error updating status", "error");
+    }
+  };
+
+  // Bulk Actions Dispatcher
+  const handleBulkAction = async (action: string, extraParams: Record<string, any> = {}) => {
+    const listIds = Array.from(selectedIds);
+    if (listIds.length === 0) return;
+
+    toast("Processing bulk updates...", "info");
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/bulk-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_ids: listIds,
+          action,
+          params: extraParams
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        toast(data.message);
+        setSelectedIds(new Set());
+        fetchLeads();
+      } else {
+        const err = await res.json();
+        toast(err.detail || "Bulk updates failed.", "error");
+      }
+    } catch (e) {
+      toast("Network connection issue.", "error");
+    }
+  };
+
+  const handleBulkExport = () => {
+    const selectedList = leads.filter(l => selectedIds.has(l.id));
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(selectedList, null, 2));
+    const downloadAnchor = document.createElement("a");
+    downloadAnchor.setAttribute("href", dataStr);
+    downloadAnchor.setAttribute("download", `exported_leads_${new Date().toISOString().split("T")[0]}.json`);
+    document.body.appendChild(downloadAnchor);
+    downloadAnchor.click();
+    downloadAnchor.remove();
+    toast(`Exported ${selectedList.length} leads successfully.`);
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkExportCsv = async () => {
+    const listIds = Array.from(selectedIds);
+    if (listIds.length === 0) return;
+    
+    toast("Generating CSV export...", "info");
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/export`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ lead_ids: listIds })
+      });
+      
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `leads_export_${new Date().toISOString().split("T")[0]}.csv`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        toast("CSV Export downloaded successfully.");
+        setSelectedIds(new Set());
+      } else {
+        toast("Failed to generate CSV export", "error");
+      }
+    } catch (e) {
+      toast("Connection issue during export.", "error");
+    }
+  };
+
+  // Selection state helpers
   const handleToggleSelectRow = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -296,29 +411,6 @@ export default function LeadsPage() {
     });
   };
 
-  // List resolving filters
-  const filteredLeads = leads.filter(lead => {
-    const companyName = lead.company_name || "";
-    const website = lead.website || "";
-    const email = lead.contact_email || "";
-    const industry = lead.industry || "";
-    const country = lead.country || "";
-    
-    const matchesSearch = companyName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          website.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          email.toLowerCase().includes(searchTerm.toLowerCase());
-    
-    const matchesIndustry = industryFilter === "all" || industry === industryFilter;
-    const matchesCountry = countryFilter === "all" || country === countryFilter;
-    const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
-    
-    const matchesEmail = emailFilter === "all" || 
-      (emailFilter === "yes" && email !== "") || 
-      (emailFilter === "no" && email === "");
-
-    return matchesSearch && matchesIndustry && matchesCountry && matchesEmail && matchesStatus;
-  });
-
   const handleToggleSelectAll = () => {
     if (selectedIds.size === filteredLeads.length) {
       setSelectedIds(new Set());
@@ -327,7 +419,37 @@ export default function LeadsPage() {
     }
   };
 
-  // Bulk Generator loop worker
+  // Filters mapping
+  const filteredLeads = leads.filter(lead => {
+    const nameStr = (lead.company_name || "").toLowerCase() + 
+                    (lead.first_name || "").toLowerCase() + 
+                    (lead.last_name || "").toLowerCase() + 
+                    lead.website.toLowerCase() + 
+                    (lead.contact_email || "").toLowerCase();
+    
+    const matchesSearch = !searchTerm || nameStr.includes(searchTerm.toLowerCase());
+    const matchesIndustry = industryFilter === "all" || lead.industry === industryFilter;
+    const matchesCountry = countryFilter === "all" || lead.country === countryFilter;
+    const matchesStatus = statusFilter === "all" || lead.lead_status === statusFilter;
+    const matchesValidation = validationFilter === "all" || lead.email_validation_status === validationFilter;
+
+    const matchesEmail = emailFilter === "all" || 
+      (emailFilter === "yes" && lead.contact_email) || 
+      (emailFilter === "no" && !lead.contact_email);
+
+    return matchesSearch && matchesIndustry && matchesCountry && matchesStatus && matchesEmail && matchesValidation;
+  });
+
+  // Pagination boundaries
+  const totalPages = Math.ceil(filteredLeads.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const paginatedLeads = filteredLeads.slice(startIndex, startIndex + itemsPerPage);
+
+  // Filters distinct list bounds
+  const uniqueIndustries = Array.from(new Set(leads.map(l => l.industry).filter(Boolean)));
+  const uniqueCountries = Array.from(new Set(leads.map(l => l.country).filter(Boolean)));
+
+  // Bulk email generation worker
   const executeBulkGeneration = async () => {
     setIsGenerating(true);
     setGenProgress(0);
@@ -359,17 +481,16 @@ export default function LeadsPage() {
           const err = await res.json();
           failuresList.push({
             company: lead.company_name || lead.website,
-            error: err.message || err.detail || "Validation check failed"
+            error: err.detail || "AI template failed"
           });
         }
       } catch (e) {
         failuresList.push({
           company: lead.company_name || lead.website,
-          error: "API connection timeout"
+          error: "API connection issue"
         });
       }
       
-      // Delay slightly between calls to prevent rate limits
       await new Promise(r => setTimeout(r, 200));
     }
 
@@ -388,48 +509,74 @@ export default function LeadsPage() {
     }
   };
 
-  // Distinct values for filter bounds
-  const uniqueIndustries = Array.from(new Set(leads.map(l => l.industry).filter(Boolean)));
-  const uniqueCountries = Array.from(new Set(leads.map(l => l.country).filter(Boolean)));
-
   return (
     <SidebarLayout>
-      {/* Title Header */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+      
+      {/* Title Dashboard */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h2 className="text-lg font-bold text-zinc-950 tracking-tight">Leads Database</h2>
-          <p className="text-xs text-zinc-500">Manage and sync prospects mapped for campaign triggers</p>
+          <h2 className="text-lg font-bold text-zinc-950 tracking-tight font-sans">Leads Database</h2>
+          <p className="text-xs text-zinc-500 font-sans">Verify B2B contacts, scores, and bulk enroll prospects</p>
         </div>
-        
-        <div className="flex flex-wrap items-center gap-3">
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            onChange={handleFileUpload} 
-            accept=".csv" 
-            className="hidden" 
-          />
+
+        <div className="flex flex-wrap items-center gap-3 relative">
+          
+          {/* Column Visibility Configuration Dropdown */}
           <button 
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => setShowColumnConfig(!showColumnConfig)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 border border-zinc-200 bg-white hover:bg-zinc-50/80 text-zinc-700 rounded-lg text-xs font-semibold shadow-sm transition-all"
+          >
+            <Settings className="w-3.5 h-3.5 text-zinc-500" />
+            Columns
+          </button>
+          
+          {showColumnConfig && (
+            <div className="absolute right-0 top-10 bg-white border border-zinc-200 rounded-xl p-3.5 shadow-xl z-40 w-48 space-y-2 text-xs text-zinc-700 animate-fade-in">
+              <span className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Toggle Columns</span>
+              {[
+                { key: "company_name", label: "Company" },
+                { key: "website", label: "Domain" },
+                { key: "industry", label: "Industry" },
+                { key: "location", label: "Location" },
+                { key: "email", label: "Email" },
+                { key: "tags", label: "Tags" },
+                { key: "fit_score", label: "Fit Score" },
+                { key: "email_validation_status", label: "Deliverability" },
+                { key: "lead_status", label: "Status" }
+              ].map(col => (
+                <label key={col.key} className="flex items-center gap-2 select-none cursor-pointer py-0.5">
+                  <input 
+                    type="checkbox"
+                    checked={visibleColumns.includes(col.key)}
+                    onChange={() => toggleColumn(col.key)}
+                    className="rounded bg-white border border-zinc-200 text-zinc-900 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  {col.label}
+                </label>
+              ))}
+            </div>
+          )}
+
+          <button 
+            onClick={() => { setWizardSourceType("file"); setShowImportWizard(true); }}
             className="inline-flex items-center gap-2 px-3 py-1.5 border border-zinc-200 bg-white hover:bg-zinc-50/80 text-zinc-700 rounded-lg text-xs font-semibold shadow-sm transition-all"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-indigo-600" />
-            Upload CSV
+            Upload File
           </button>
           
           <button 
-            onClick={handleImportSheet}
-            disabled={isIngesting}
-            className="inline-flex items-center gap-2 px-3 py-1.5 border border-zinc-200 bg-white hover:bg-zinc-50/80 disabled:opacity-50 text-zinc-700 rounded-lg text-xs font-semibold shadow-sm transition-all"
+            onClick={() => { setWizardSourceType("sheets"); setShowImportWizard(true); }}
+            className="inline-flex items-center gap-2 px-3 py-1.5 border border-zinc-200 bg-white hover:bg-zinc-50/80 text-zinc-700 rounded-lg text-xs font-semibold shadow-sm transition-all"
           >
             <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-            {isIngesting ? "Syncing..." : "Sync Google Sheet"}
+            Sync Google Sheet
           </button>
-          
+
           <button 
             onClick={() => {
               if (leads.length === 0) {
-                toast("No leads found in database to generate drafts for.", "error");
+                toast("No leads found to trigger email generation.", "error");
                 return;
               }
               setGenerateForAll(true);
@@ -438,9 +585,9 @@ export default function LeadsPage() {
             className="inline-flex items-center gap-2 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-all shadow-sm"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            Generate AI Drafts for All
+            Generate for All
           </button>
-          
+
           <button 
             onClick={() => setShowAddModal(true)}
             className="inline-flex items-center gap-2 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-semibold transition-all shadow-sm"
@@ -451,8 +598,8 @@ export default function LeadsPage() {
         </div>
       </div>
 
-      {/* Filters card */}
-      <div className="bg-white p-4 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] grid grid-cols-1 sm:grid-cols-5 gap-4 items-end">
+      {/* Filters Dashboard card */}
+      <div className="bg-white p-4 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] grid grid-cols-1 sm:grid-cols-6 gap-3 items-end mb-6">
         <div className="sm:col-span-2 relative">
           <label className="text-[10px] text-zinc-400 font-bold block mb-1.5 uppercase tracking-wider">Search Leads</label>
           <div className="relative">
@@ -461,7 +608,7 @@ export default function LeadsPage() {
               type="text"
               placeholder="Search company, website, or email..."
               value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
+              onChange={e => { setSearchTerm(e.target.value); setCurrentPage(1); }}
               className="w-full pl-9 pr-4 py-1.5 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-900 transition-all font-medium placeholder-zinc-400"
             />
           </div>
@@ -471,7 +618,7 @@ export default function LeadsPage() {
           <label className="text-[10px] text-zinc-400 font-bold block mb-1.5 uppercase tracking-wider">Industry</label>
           <select 
             value={industryFilter} 
-            onChange={e => setIndustryFilter(e.target.value)}
+            onChange={e => { setIndustryFilter(e.target.value); setCurrentPage(1); }}
             className="w-full px-3 py-1.5 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-900 transition-all"
           >
             <option value="all">All Industries</option>
@@ -485,7 +632,7 @@ export default function LeadsPage() {
           <label className="text-[10px] text-zinc-400 font-bold block mb-1.5 uppercase tracking-wider">Country</label>
           <select 
             value={countryFilter} 
-            onChange={e => setCountryFilter(e.target.value)}
+            onChange={e => { setCountryFilter(e.target.value); setCurrentPage(1); }}
             className="w-full px-3 py-1.5 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-900 transition-all"
           >
             <option value="all">All Countries</option>
@@ -496,10 +643,26 @@ export default function LeadsPage() {
         </div>
 
         <div>
-          <label className="text-[10px] text-zinc-400 font-bold block mb-1.5 uppercase tracking-wider">Contact Email</label>
+          <label className="text-[10px] text-zinc-400 font-bold block mb-1.5 uppercase tracking-wider">Deliverability</label>
+          <select 
+            value={validationFilter} 
+            onChange={e => { setValidationFilter(e.target.value); setCurrentPage(1); }}
+            className="w-full px-3 py-1.5 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none"
+          >
+            <option value="all">All statuses</option>
+            <option value="valid">Valid only</option>
+            <option value="invalid">Invalid only</option>
+            <option value="disposable">Disposable</option>
+            <option value="role_address">Role Address</option>
+            <option value="unchecked">Unchecked</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="text-[10px] text-zinc-400 font-bold block mb-1.5 uppercase tracking-wider">Email Check</label>
           <select 
             value={emailFilter} 
-            onChange={e => setEmailFilter(e.target.value)}
+            onChange={e => { setEmailFilter(e.target.value); setCurrentPage(1); }}
             className="w-full px-3 py-1.5 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none"
           >
             <option value="all">All Contacts</option>
@@ -512,49 +675,15 @@ export default function LeadsPage() {
       {/* Leads Table Container */}
       <div className="bg-white rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] overflow-hidden">
         {loadingLeads ? (
-          <div className="p-8 space-y-4 animate-pulse">
-            <div className="flex gap-4 items-center border-b border-zinc-100 pb-3">
-              <div className="h-4 w-4 bg-zinc-200 rounded"></div>
-              <div className="h-4 w-28 bg-zinc-200 rounded"></div>
-              <div className="h-4 w-32 bg-zinc-100 rounded"></div>
-              <div className="h-4 w-20 bg-zinc-100 rounded"></div>
-              <div className="h-4 w-40 bg-zinc-200 rounded"></div>
-              <div className="h-4.5 w-16 bg-zinc-200 rounded-full"></div>
-            </div>
-            {[...Array(4)].map((_, idx) => (
-              <div key={idx} className="flex gap-4 items-center py-1">
-                <div className="h-4 w-4 bg-zinc-100 rounded"></div>
-                <div className="h-4 w-28 bg-zinc-100 rounded"></div>
-                <div className="h-4 w-32 bg-zinc-50 rounded"></div>
-                <div className="h-4 w-20 bg-zinc-50 rounded"></div>
-                <div className="h-4 w-40 bg-zinc-100 rounded"></div>
-                <div className="h-4.5 w-16 bg-zinc-100 rounded-full"></div>
-              </div>
-            ))}
-          </div>
-        ) : filteredLeads.length === 0 ? (
-          /* Empty State */
+          <div className="p-8 text-center text-xs text-zinc-500 animate-pulse">Loading prospects catalog database...</div>
+        ) : paginatedLeads.length === 0 ? (
           <div className="p-16 text-center max-w-md mx-auto space-y-4">
             <div className="w-12 h-12 bg-zinc-50 rounded-2xl flex items-center justify-center border border-zinc-200 mx-auto">
               <FileSpreadsheet className="w-5 h-5 text-zinc-500" />
             </div>
             <div className="space-y-1">
               <h3 className="text-sm font-bold text-zinc-900">No leads found</h3>
-              <p className="text-xs text-zinc-500 leading-relaxed">Sync your Google Sheets campaign file or add a prospect manually to configure leads database profiles.</p>
-            </div>
-            <div className="pt-2 flex justify-center gap-3">
-              <button 
-                onClick={handleImportSheet}
-                className="px-3 py-1.5 border border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 rounded-lg text-xs font-semibold shadow-sm"
-              >
-                Sync Sheets File
-              </button>
-              <button 
-                onClick={() => setShowAddModal(true)}
-                className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-semibold shadow-sm"
-              >
-                Create Lead
-              </button>
+              <p className="text-xs text-zinc-500">Filter parameters returned zero matched lead records.</p>
             </div>
           </div>
         ) : (
@@ -571,18 +700,20 @@ export default function LeadsPage() {
                       )}
                     </button>
                   </th>
-                  <th className="p-4">Company</th>
-                  <th className="p-4">Domain</th>
-                  <th className="p-4">Industry</th>
-                  <th className="p-4">Location</th>
-                  <th className="p-4">Email</th>
-                  <th className="p-4">ERP Pain Points / Approach</th>
-                  <th className="p-4 text-center">Status</th>
+                  {visibleColumns.includes("company_name") && <th className="p-4">Company</th>}
+                  {visibleColumns.includes("website") && <th className="p-4">Domain</th>}
+                  {visibleColumns.includes("industry") && <th className="p-4">Industry</th>}
+                  {visibleColumns.includes("location") && <th className="p-4">Location</th>}
+                  {visibleColumns.includes("email") && <th className="p-4">Email</th>}
+                  {visibleColumns.includes("tags") && <th className="p-4">Tags</th>}
+                  {visibleColumns.includes("fit_score") && <th className="p-4 text-center">Fit Score</th>}
+                  {visibleColumns.includes("email_validation_status") && <th className="p-4 text-center">Verification</th>}
+                  {visibleColumns.includes("lead_status") && <th className="p-4 text-center">Status</th>}
                   <th className="p-4 text-center">Actions</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-zinc-100 text-[11px]">
-                {filteredLeads.map(lead => {
+              <tbody className="divide-y divide-zinc-100 text-[11px] font-sans">
+                {paginatedLeads.map(lead => {
                   const isSelected = selectedIds.has(lead.id);
                   return (
                     <tr key={lead.id} className={`hover:bg-zinc-50/40 transition-all ${isSelected ? "bg-zinc-50/80" : ""}`}>
@@ -595,62 +726,122 @@ export default function LeadsPage() {
                           )}
                         </button>
                       </td>
-                      <td className="p-4 font-bold text-zinc-900 max-w-[150px] truncate">{lead.company_name || lead.website.split(".")[0].toUpperCase()}</td>
-                      <td className="p-4 max-w-[150px] truncate">
-                        <a href={`https://${lead.website}`} target="_blank" className="text-indigo-600 hover:underline flex items-center gap-1 hover:text-indigo-500">
-                          {lead.website}
-                          <ExternalLink className="w-2.5 h-2.5 shrink-0" />
-                        </a>
-                      </td>
-                      <td className="p-4 font-medium text-zinc-600">{lead.industry || "N/A"}</td>
-                      <td className="p-4 font-medium text-zinc-500">{lead.country || "N/A"}</td>
-                      <td className="p-4 font-medium text-zinc-600">
-                        {lead.contact_email ? (
-                          <span>{lead.contact_email}</span>
-                        ) : (
-                          <span className="text-rose-700 font-bold uppercase text-[9px] tracking-wider bg-rose-50 px-2 py-0.5 rounded border border-rose-100">No Contact</span>
-                        )}
-                      </td>
-                      <td className="p-4 text-zinc-600 max-w-[300px] truncate" title={lead.erp_approach || ""}>{lead.erp_approach || "None"}</td>
-                      <td className="p-4 text-center">
-                        {lead.lead_status === "Pending" ? (
+                      {visibleColumns.includes("company_name") && (
+                        <td className="p-4">
+                          <div className="font-bold text-zinc-900 truncate max-w-[130px]">{lead.company_name}</div>
+                          {lead.full_name && (
+                            <div className="text-[10px] text-zinc-400 font-medium truncate max-w-[130px]">
+                              {lead.full_name} {lead.job_title ? `• ${lead.job_title}` : ""}
+                            </div>
+                          )}
+                        </td>
+                      )}
+                      {visibleColumns.includes("website") && (
+                        <td className="p-4">
+                          <a href={lead.website} target="_blank" className="text-indigo-600 hover:underline inline-flex items-center gap-1">
+                            {lead.website.replace("https://", "").replace("http://", "")}
+                            <ExternalLink className="w-2.5 h-2.5" />
+                          </a>
+                        </td>
+                      )}
+                      {visibleColumns.includes("industry") && <td className="p-4 text-zinc-600">{lead.industry || "N/A"}</td>}
+                      {visibleColumns.includes("location") && (
+                        <td className="p-4 text-zinc-500">
+                          {lead.city ? `${lead.city}, ` : ""}{lead.country || "N/A"}
+                        </td>
+                      )}
+                      {visibleColumns.includes("email") && <td className="p-4 font-mono text-zinc-600">{lead.contact_email || "N/A"}</td>}
+                      
+                      {visibleColumns.includes("tags") && (
+                        <td className="p-4">
+                          <div className="flex flex-wrap gap-1 max-w-[150px]">
+                            {lead.tags && lead.tags.length > 0 ? (
+                              lead.tags.slice(0, 3).map((tag, idx) => (
+                                <span key={idx} className="bg-zinc-100 border border-zinc-200 px-1.5 py-0.5 rounded text-[9px] text-zinc-600 font-semibold uppercase">{tag}</span>
+                              ))
+                            ) : (
+                              <span className="text-zinc-300">-</span>
+                            )}
+                          </div>
+                        </td>
+                      )}
+                      
+                      {visibleColumns.includes("fit_score") && (
+                        <td className="p-4 text-center">
                           <button
-                            onClick={() => handleToggleLeadStatus(lead.id, "Pending")}
-                            className="inline-flex px-2.5 py-1 bg-zinc-950 hover:bg-zinc-800 text-white rounded text-[9px] font-extrabold uppercase tracking-wider transition-colors shadow-sm"
+                            onClick={() => setFitScoreLead(lead)}
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                              (lead.fit_score || 0) >= 75 
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-100" 
+                                : (lead.fit_score || 0) >= 40 
+                                ? "bg-amber-50 text-amber-700 border border-amber-100" 
+                                : "bg-rose-50 text-rose-700 border border-rose-100"
+                            }`}
+                            title="Click to view explanation criteria"
                           >
-                            Approve
+                            {lead.fit_score !== null ? `${lead.fit_score}/100` : "N/A"}
                           </button>
-                        ) : (
+                        </td>
+                      )}
+                      
+                      {visibleColumns.includes("email_validation_status") && (
+                        <td className="p-4 text-center">
+                          <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase border ${
+                            lead.email_validation_status === "valid" 
+                              ? "bg-emerald-50 text-emerald-700 border-emerald-100" 
+                              : lead.email_validation_status === "disposable" 
+                              ? "bg-amber-50 text-amber-700 border-amber-100" 
+                              : lead.email_validation_status === "role_address" 
+                              ? "bg-sky-50 text-sky-700 border-sky-100" 
+                              : lead.email_validation_status === "invalid" 
+                              ? "bg-rose-50 text-rose-700 border-rose-100" 
+                              : "bg-zinc-100 text-zinc-500 border-zinc-200"
+                          }`}>
+                            {lead.email_validation_status || "unchecked"}
+                          </span>
+                        </td>
+                      )}
+
+                      {visibleColumns.includes("lead_status") && (
+                        <td className="p-4 text-center">
                           <button
                             onClick={() => handleToggleLeadStatus(lead.id, lead.lead_status)}
-                            className={`inline-flex px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider border transition-colors ${
+                            className={`px-2 py-0.5 rounded-full text-[9px] font-bold border transition-colors ${
                               lead.lead_status === "Approved" 
                                 ? "bg-emerald-50 border-emerald-100 text-emerald-700 hover:bg-emerald-100" 
-                                : lead.lead_status === "Processed" 
-                                ? "bg-emerald-50 border-emerald-100 text-emerald-700" 
-                                : lead.lead_status === "Generating" 
-                                ? "bg-indigo-50 border-indigo-100 text-indigo-700 animate-pulse" 
-                                : lead.lead_status === "Failed" 
-                                ? "bg-rose-50 border-rose-100 text-rose-700" 
-                                : "bg-zinc-100 border-zinc-200 text-zinc-500 hover:bg-zinc-200"
+                                : lead.lead_status === "Pending" 
+                                ? "bg-zinc-100 border-zinc-200 text-zinc-600 hover:bg-zinc-200" 
+                                : "bg-indigo-50 border-indigo-100 text-indigo-700"
                             }`}
                           >
                             {lead.lead_status}
                           </button>
-                        )}
-                      </td>
+                        </td>
+                      )}
+
                       <td className="p-4 text-center">
                         <div className="flex items-center justify-center gap-1.5">
+                          
+                          {/* Custom fields drawer button */}
+                          <button 
+                            onClick={() => setCustomFieldsLead(lead)}
+                            className="p-1 rounded hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700"
+                            title="View Custom Fields Dictionary"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+
                           <button 
                             onClick={() => handleEditClick(lead)}
-                            className="p-1.5 rounded hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700 transition-colors"
-                            title="Edit Lead"
+                            className="p-1 rounded hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700"
+                            title="Edit Lead Details"
                           >
                             <Edit3 className="w-3.5 h-3.5" />
                           </button>
+                          
                           <button 
                             onClick={() => handleDeleteLead(lead.id, lead.company_name || lead.website)}
-                            className="p-1.5 rounded hover:bg-rose-50 text-zinc-400 hover:text-rose-600 transition-colors"
+                            className="p-1 rounded hover:bg-rose-50 text-zinc-400 hover:text-rose-600"
                             title="Delete Lead"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -664,38 +855,231 @@ export default function LeadsPage() {
             </table>
           </div>
         )}
+
+        {/* Pagination Toolbar */}
+        {!loadingLeads && totalPages > 1 && (
+          <div className="px-6 py-3 bg-zinc-50/50 border-t border-zinc-100 flex items-center justify-between text-xs text-zinc-500 font-sans">
+            <div>
+              Showing <span className="font-bold text-zinc-900">{startIndex + 1}</span> to <span className="font-bold text-zinc-900">{Math.min(startIndex + itemsPerPage, filteredLeads.length)}</span> of <span className="font-bold text-zinc-900">{filteredLeads.length}</span> prospects
+            </div>
+            <div className="flex gap-2">
+              <button
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                className="px-2.5 py-1 border border-zinc-200 bg-white rounded hover:bg-zinc-50 disabled:opacity-40"
+              >
+                Previous
+              </button>
+              <button
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                className="px-2.5 py-1 border border-zinc-200 bg-white rounded hover:bg-zinc-50 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Floating Bulk Action Bar */}
+      {/* Floating Bulk Action Bar Dashboard */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-zinc-200 px-6 py-3 rounded-full shadow-lg z-30 flex items-center gap-4 animate-fade-in">
-          <span className="text-xs font-semibold text-zinc-600">
-            <span className="text-zinc-950 font-extrabold">{selectedIds.size}</span> leads selected
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-zinc-200 px-6 py-3 rounded-full shadow-lg z-30 flex items-center gap-3 animate-fade-in font-sans">
+          <span className="text-xs font-semibold text-zinc-600 whitespace-nowrap">
+            <span className="text-zinc-950 font-extrabold">{selectedIds.size}</span> selected
           </span>
           
           <button 
-            onClick={() => setShowGenModal(true)}
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-full text-xs font-bold transition-all shadow-sm"
+            onClick={() => handleBulkAction("revalidate")}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            Generate AI Drafts
+            <RefreshCw className="w-3 h-3 text-indigo-600" />
+            Verify Emails
+          </button>
+
+          <button 
+            onClick={() => handleBulkAction("research")}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
+          >
+            <Sparkles className="w-3 h-3 text-amber-500" />
+            AI Research
+          </button>
+
+          <button 
+            onClick={() => { setBulkActionType("add"); setShowBulkTagModal(true); }}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
+          >
+            Add Tags
+          </button>
+
+          <button 
+            onClick={() => { setShowBulkEnrollModal(true); }}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
+          >
+            Enroll Campaign
+          </button>
+
+          <button 
+            onClick={() => handleBulkAction("archive")}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
+          >
+            <Archive className="w-3 h-3 text-zinc-500" />
+            Archive
+          </button>
+
+          <button 
+            onClick={handleBulkExportCsv}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
+          >
+            <Download className="w-3 h-3 text-indigo-600" />
+            Export CSV
+          </button>
+
+          <button 
+            onClick={handleBulkExport}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
+          >
+            <Download className="w-3 h-3 text-emerald-600" />
+            Export JSON
           </button>
           
           <button 
             onClick={() => setSelectedIds(new Set())}
             className="text-xs text-zinc-400 hover:text-zinc-600 font-semibold px-1"
           >
-            Deselect
+            Cancel
           </button>
         </div>
       )}
 
-      {/* Generating Wizard Modal */}
+      {/* Bulk Tag Modal popup */}
+      {showBulkTagModal && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans">
+          <div className="max-w-sm w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg p-5 space-y-4">
+            <h3 className="font-bold text-zinc-900 text-xs">Bulk {bulkActionType === "add" ? "Apply" : "Remove"} Tags</h3>
+            <input 
+              type="text" 
+              placeholder="e.g. lead, warm, construction"
+              value={bulkTagInput}
+              onChange={e => setBulkTagInput(e.target.value)}
+              className="w-full px-3 py-1.5 border border-zinc-200 rounded text-xs focus:outline-none"
+            />
+            <div className="flex justify-end gap-2 text-xs">
+              <button onClick={() => setShowBulkTagModal(false)} className="px-3 py-1.5 border border-zinc-200 rounded">Cancel</button>
+              <button 
+                onClick={() => {
+                  handleBulkAction(bulkActionType === "add" ? "add_tags" : "remove_tags", { tags: bulkTagInput.split(",").map(t => t.trim()) });
+                  setShowBulkTagModal(false);
+                  setBulkTagInput("");
+                }} 
+                className="px-3 py-1.5 bg-zinc-900 text-white rounded font-bold"
+              >
+                Confirm Tags
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Enroll Modal popup */}
+      {showBulkEnrollModal && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans">
+          <div className="max-w-sm w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg p-5 space-y-4">
+            <h3 className="font-bold text-zinc-900 text-xs">Bulk Enroll prospects in Campaign Sequence</h3>
+            <select
+              value={selectedCampaignId}
+              onChange={e => setSelectedCampaignId(e.target.value)}
+              className="w-full px-3 py-1.5 border border-zinc-200 rounded text-xs focus:outline-none"
+            >
+              <option value="">Select Target campaign sequence...</option>
+              {campaigns.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <div className="flex justify-end gap-2 text-xs">
+              <button onClick={() => setShowBulkEnrollModal(false)} className="px-3 py-1.5 border border-zinc-200 rounded">Cancel</button>
+              <button 
+                onClick={() => {
+                  handleBulkAction("enroll_campaign", { campaign_id: selectedCampaignId });
+                  setShowBulkEnrollModal(false);
+                  setSelectedCampaignId("");
+                }}
+                disabled={!selectedCampaignId}
+                className="px-3 py-1.5 bg-indigo-600 text-white rounded font-bold disabled:opacity-50"
+              >
+                Launch Enrollment
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Fit Score diagnosis popup */}
+      {fitScoreLead && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans animate-fade-in">
+          <div className="max-w-md w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg p-6 space-y-4">
+            <div className="flex justify-between items-center border-b border-zinc-100 pb-3">
+              <h3 className="font-bold text-zinc-900 text-xs">Fit Alignment Diagnosis - {fitScoreLead.company_name}</h3>
+              <button onClick={() => setFitScoreLead(null)} className="text-zinc-400 hover:text-zinc-600"><X className="w-4 h-4" /></button>
+            </div>
+            
+            <div className="text-center py-3">
+              <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-700 text-xl font-black">
+                {fitScoreLead.fit_score || 0}
+              </div>
+              <span className="text-[10px] text-zinc-400 block mt-1 uppercase font-bold tracking-wider">Score Value</span>
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider">Calculated alignment reasons</span>
+              <div className="max-h-48 overflow-y-auto space-y-2 text-xs text-zinc-600 leading-relaxed font-medium">
+                {fitScoreLead.fit_score_reasons && fitScoreLead.fit_score_reasons.length > 0 ? (
+                  fitScoreLead.fit_score_reasons.map((r, idx) => (
+                    <div key={idx} className="flex gap-2 items-start bg-zinc-50 p-2 border border-zinc-200/50 rounded-lg">
+                      <Check className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                      <span>{r}</span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-zinc-400 text-center py-4">No scoring rules evaluated for this lead record yet.</p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Custom fields drawer viewer popup */}
+      {customFieldsLead && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans animate-fade-in">
+          <div className="max-w-md w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg p-6 space-y-4">
+            <div className="flex justify-between items-center border-b border-zinc-100 pb-3">
+              <h3 className="font-bold text-zinc-900 text-xs">Custom Metadata Dictionary - {customFieldsLead.company_name}</h3>
+              <button onClick={() => setCustomFieldsLead(null)} className="text-zinc-400 hover:text-zinc-600"><X className="w-4 h-4" /></button>
+            </div>
+
+            <div className="max-h-64 overflow-y-auto">
+              {customFieldsLead.custom_fields && Object.keys(customFieldsLead.custom_fields).length > 0 ? (
+                <div className="border border-zinc-200 rounded-lg divide-y divide-zinc-200 text-xs font-sans">
+                  {Object.entries(customFieldsLead.custom_fields).map(([k, v]) => (
+                    <div key={k} className="p-3 flex justify-between gap-4">
+                      <span className="font-bold text-zinc-800 uppercase text-[10px] tracking-wide">{k}</span>
+                      <span className="text-zinc-600 text-right">{String(v)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-zinc-400 text-xs text-center py-8">No custom column attributes mapped for this lead profile.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Generating wizard modal popup */}
       {showGenModal && (
-        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg p-6 space-y-4 animate-fade-in">
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans animate-fade-in">
+          <div className="max-w-md w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg p-6 space-y-4">
             <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
-              <h3 className="font-bold text-zinc-900 text-sm">Generate Email Drafts</h3>
+              <h3 className="font-bold text-zinc-900 text-xs">Bulk Generate Outreach Drafts</h3>
               <button 
                 onClick={() => {
                   if (!isGenerating) {
@@ -712,7 +1096,7 @@ export default function LeadsPage() {
 
             {!isGenerating && genFailures.length === 0 && genSuccessCount === 0 ? (
               <div className="space-y-4 text-xs text-zinc-700">
-                <p className="text-zinc-500">Choose email generation settings for the {generateForAll ? leads.length : selectedIds.size} target leads.</p>
+                <p className="text-zinc-500">Launch personalized email content generation via Gemini for the {generateForAll ? leads.length : selectedIds.size} target leads.</p>
 
                 <div className="flex items-center gap-2 pt-2">
                   <input 
@@ -749,7 +1133,7 @@ export default function LeadsPage() {
               <div className="text-center py-6 space-y-4">
                 <RefreshCw className="w-8 h-8 mx-auto animate-spin text-zinc-600" />
                 <div className="space-y-1">
-                  <div className="text-xs font-bold text-zinc-900">Generating drafts...</div>
+                  <div className="text-xs font-bold text-zinc-900">Generating personalized drafts...</div>
                   <div className="text-[10px] text-zinc-500">Processing lead {genProgress} of {generateForAll ? leads.length : selectedIds.size}</div>
                 </div>
                 
@@ -758,7 +1142,6 @@ export default function LeadsPage() {
                 </div>
               </div>
             ) : (
-              /* Generation Results & Failure Report */
               <div className="space-y-4 text-xs text-zinc-700">
                 <div className="flex gap-2 items-center text-amber-600">
                   <AlertCircle className="w-4 h-4" />
@@ -783,38 +1166,24 @@ export default function LeadsPage() {
                     </div>
                   </div>
                 )}
-
-                <div className="pt-4 border-t border-zinc-100 flex justify-end">
-                  <button 
-                    onClick={() => {
-                      setShowGenModal(false);
-                      setSelectedIds(new Set());
-                      setGenerateForAll(false);
-                      fetchLeads();
-                    }}
-                    className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-bold"
-                  >
-                    Close Report
-                  </button>
-                </div>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* Add Lead Dialog Modal */}
+      {/* Add Lead Modal popup */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="max-w-lg w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg animate-fade-in">
-            <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
-              <h3 className="font-bold text-zinc-950 text-sm">Add New Prospect Lead</h3>
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans">
+          <div className="max-w-lg w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg animate-fade-in flex flex-col max-h-[85vh]">
+            <div className="px-6 py-4 border-b border-zinc-100 flex justify-between items-center">
+              <h3 className="font-bold text-zinc-950 text-sm">Add Lead Profile Manual Creation</h3>
               <button onClick={() => setShowAddModal(false)} className="text-zinc-400 hover:text-zinc-600 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
             
-            <form onSubmit={handleAddLeadSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleAddLeadSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Company Name</label>
@@ -822,7 +1191,7 @@ export default function LeadsPage() {
                     type="text" 
                     value={newCompany} 
                     onChange={e => setNewCompany(e.target.value)} 
-                    placeholder="e.g. Apex Builders"
+                    placeholder="e.g. Apex solutions"
                     className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                   />
                 </div>
@@ -832,43 +1201,110 @@ export default function LeadsPage() {
                     type="text" 
                     value={newWebsite} 
                     onChange={e => setNewWebsite(e.target.value)} 
-                    placeholder="e.g. apex-builders.com"
+                    placeholder="e.g. apex-solutions.com"
                     className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                     required
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">First Name</label>
+                  <input 
+                    type="text" 
+                    value={newFirstName} 
+                    onChange={e => setNewFirstName(e.target.value)} 
+                    placeholder="John"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Last Name</label>
+                  <input 
+                    type="text" 
+                    value={newLastName} 
+                    onChange={e => setNewLastName(e.target.value)} 
+                    placeholder="Doe"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Job Title</label>
+                  <input 
+                    type="text" 
+                    value={newJobTitle} 
+                    onChange={e => setNewJobTitle(e.target.value)} 
+                    placeholder="VP Sales"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Industry</label>
                   <input 
                     type="text" 
                     value={newIndustry} 
                     onChange={e => setNewIndustry(e.target.value)} 
-                    placeholder="Construction"
+                    placeholder="HVAC"
                     className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                   />
                 </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Country</label>
+                  <input 
+                    type="text" 
+                    value={newCountry} 
+                    onChange={e => setNewCountry(e.target.value)} 
+                    placeholder="USA"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">City</label>
+                  <input 
+                    type="text" 
+                    value={newCity} 
+                    onChange={e => setNewCity(e.target.value)} 
+                    placeholder="Boston"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Contact Email</label>
                   <input 
                     type="email" 
                     value={newEmail} 
                     onChange={e => setNewEmail(e.target.value)} 
-                    placeholder="sales@apex.com"
+                    placeholder="john@apex.com"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Phone Number</label>
+                  <input 
+                    type="text" 
+                    value={newPhone} 
+                    onChange={e => setNewPhone(e.target.value)} 
+                    placeholder="+16175550199"
                     className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">ERP Pain Points</label>
-                <textarea 
-                  value={newErp} 
-                  onChange={e => setNewErp(e.target.value)} 
-                  placeholder="e.g. spreadsheets duplication, manual job costing delays"
-                  className="w-full h-24 px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950 leading-relaxed"
+                <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Tags (Comma-separated)</label>
+                <input 
+                  type="text" 
+                  value={newTags} 
+                  onChange={e => setNewTags(e.target.value)} 
+                  placeholder="warm, b2b, target"
+                  className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                 />
               </div>
 
@@ -892,18 +1328,18 @@ export default function LeadsPage() {
         </div>
       )}
 
-      {/* Edit Lead Dialog Modal */}
+      {/* Edit Lead Modal popup */}
       {showEditModal && (
-        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6">
-          <div className="max-w-lg w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg animate-fade-in">
-            <div className="px-6 py-4 border-b border-zinc-100 flex items-center justify-between">
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans">
+          <div className="max-w-lg w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg animate-fade-in flex flex-col max-h-[85vh]">
+            <div className="px-6 py-4 border-b border-zinc-100 flex justify-between items-center">
               <h3 className="font-bold text-zinc-950 text-sm">Edit Prospect Lead</h3>
               <button onClick={() => setShowEditModal(false)} className="text-zinc-400 hover:text-zinc-600 transition-colors">
                 <X className="w-4 h-4" />
               </button>
             </div>
             
-            <form onSubmit={handleEditSubmit} className="p-6 space-y-4">
+            <form onSubmit={handleEditSubmit} className="p-6 space-y-4 overflow-y-auto flex-1 text-xs">
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Company Name</label>
@@ -928,7 +1364,40 @@ export default function LeadsPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">First Name</label>
+                  <input 
+                    type="text" 
+                    value={editFirstName} 
+                    onChange={e => setEditFirstName(e.target.value)} 
+                    placeholder="First name"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Last Name</label>
+                  <input 
+                    type="text" 
+                    value={editLastName} 
+                    onChange={e => setEditLastName(e.target.value)} 
+                    placeholder="Last name"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Job Title</label>
+                  <input 
+                    type="text" 
+                    value={editJobTitle} 
+                    onChange={e => setEditJobTitle(e.target.value)} 
+                    placeholder="Job title"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Industry</label>
                   <input 
@@ -940,6 +1409,29 @@ export default function LeadsPage() {
                   />
                 </div>
                 <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Country</label>
+                  <input 
+                    type="text" 
+                    value={editCountry} 
+                    onChange={e => setEditCountry(e.target.value)} 
+                    placeholder="USA"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">City</label>
+                  <input 
+                    type="text" 
+                    value={editCity} 
+                    onChange={e => setEditCity(e.target.value)} 
+                    placeholder="City"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
                   <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Contact Email</label>
                   <input 
                     type="email" 
@@ -949,16 +1441,26 @@ export default function LeadsPage() {
                     className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                   />
                 </div>
+                <div>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Phone Number</label>
+                  <input 
+                    type="text" 
+                    value={editPhone} 
+                    onChange={e => setEditPhone(e.target.value)} 
+                    placeholder="Phone number"
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Country</label>
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Tags (Comma-separated)</label>
                   <input 
                     type="text" 
-                    value={editCountry} 
-                    onChange={e => setEditCountry(e.target.value)} 
-                    placeholder="USA"
+                    value={editTags} 
+                    onChange={e => setEditTags(e.target.value)} 
+                    placeholder="warm, tags"
                     className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                   />
                 </div>
@@ -973,18 +1475,9 @@ export default function LeadsPage() {
                     <option value="Approved">Approved</option>
                     <option value="Processed">Processed</option>
                     <option value="Failed">Failed</option>
+                    <option value="Archived">Archived</option>
                   </select>
                 </div>
-              </div>
-
-              <div>
-                <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">ERP Pain Points</label>
-                <textarea 
-                  value={editErp} 
-                  onChange={e => setEditErp(e.target.value)} 
-                  placeholder="e.g. spreadsheets duplication, manual job costing delays"
-                  className="w-full h-24 px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950 leading-relaxed"
-                />
               </div>
 
               <div className="pt-4 flex justify-end gap-3 border-t border-zinc-100">
@@ -1006,6 +1499,17 @@ export default function LeadsPage() {
           </div>
         </div>
       )}
+
+      {/* Universal Import Wizard popup */}
+      {showImportWizard && (
+        <ImportWizardModal 
+          isOpen={showImportWizard} 
+          onClose={() => setShowImportWizard(false)} 
+          onImportComplete={fetchLeads} 
+          defaultSourceType={wizardSourceType}
+        />
+      )}
+
     </SidebarLayout>
   );
 }

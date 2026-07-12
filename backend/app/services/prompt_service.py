@@ -1,5 +1,4 @@
 import logging
-from typing import Dict, Any
 
 logger = logging.getLogger("outreachops.services.prompt")
 
@@ -21,14 +20,15 @@ BANNED_PHRASES = [
     "game changer",
     "scale your business",
     "we noticed that",
-    "I noticed that"
+    "I noticed that",
 ]
+
 
 class PromptService:
     """
     Service to compile dynamic instruction sets based on tone, length, and CTA configurations.
     """
-    
+
     def get_banned_phrases_instruction(self) -> str:
         """Returns the prompt instruction listing banned phrases."""
         phrases_list = ", ".join([f'"{p}"' for p in BANNED_PHRASES])
@@ -37,26 +37,38 @@ class PromptService:
             f"If you use any of these phrases, the email will be rejected immediately."
         )
 
-    def build_erp_prompt(self, website: str, erp_approach: str, tone: str, length: str, cta: str, signature: str) -> str:
+    def build_erp_prompt(
+        self,
+        website: str,
+        erp_approach: str,
+        tone: str,
+        length: str,
+        cta: str,
+        signature: str,
+    ) -> str:
         """Compiles instructions for ERP custom solutions."""
         word_bounds = "60-90 words" if length == "short" else "80-120 words"
-        
+
         tone_instruction = ""
         if tone == "founder-style":
             tone_instruction = "Write like an experienced builder providing a realistic workflow critique."
         elif tone == "direct":
             tone_instruction = "Write in a direct, practical operational tone."
         elif tone == "friendly":
-            tone_instruction = "Write in a warm, consultative operational efficiency tone."
-        else: # premium-simple
-            tone_instruction = "Write in a clean, minimal, high-end software agency founder tone."
+            tone_instruction = (
+                "Write in a warm, consultative operational efficiency tone."
+            )
+        else:  # premium-simple
+            tone_instruction = (
+                "Write in a clean, minimal, high-end software agency founder tone."
+            )
 
         cta_instruction = ""
         if cta == "suggestion-first":
             cta_instruction = "End with a short suggestion-first call to action (e.g. asking if they want to review a workflow draft)."
         elif cta == "direct":
             cta_instruction = "End with a direct call to action for a brief chat."
-        else: # soft
+        else:  # soft
             cta_instruction = "End with a soft call to action asking if they are looking into scheduling upgrades."
 
         banned_inst = self.get_banned_phrases_instruction()

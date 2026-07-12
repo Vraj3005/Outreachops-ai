@@ -1,18 +1,19 @@
-from typing import Optional
-from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
+
+from pydantic import BaseModel, Field
+
 
 class UserBase(BaseModel):
     email: str = Field(..., description="User unique email address")
-    full_name: Optional[str] = Field(None, description="User full name")
+    full_name: str | None = Field(None, description="User full name")
+
 
 class UserCreate(UserBase):
     pass
+
 
 class User(UserBase):
     id: str
     created_at: datetime
 
-    model_config = {
-        "from_attributes": True
-    }
+    model_config = {"from_attributes": True}
