@@ -1,5 +1,6 @@
 import csv
 import io
+import json
 import logging
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile, Query, status
@@ -116,7 +117,13 @@ async def add_lead(
         "target_locations": ["usa", "canada"],
         "target_roles": ["sales", "owner", "partner", "founder", "manager"]
     }
-    score, reasons = quality_service.calculate_fit_score(normalized, campaign_criteria)
+    from app.services.personalization_context_service import PersonalizationContextService
+    score, reasons = PersonalizationContextService.calculate_explainable_fit_score(
+        lead=normalized,
+        campaign=campaign_criteria,
+        research_fresh=False,
+        research_summary=""
+    )
     normalized["fit_score"] = score
     normalized["fit_score_reasons"] = reasons
 
@@ -129,6 +136,7 @@ async def add_lead(
     except Exception as e:
         logger.error(f"Error creating lead: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
 
 @router.patch("/{id}", response_model=Lead)
 async def modify_lead(
@@ -157,21 +165,56 @@ async def modify_lead(
     # Normalize overlay
     normalized = quality_service.normalize_lead_data(merged_data)
 
-    # Re-verify and re-score if emails/websites changed
-    if update_data.get("contact_email") or update_data.get("website"):
-        email = normalized.get("contact_email")
-        if email:
-            verification = quality_service.verify_email(email)
-            normalized["email_validation_status"] = verification["status"]
-            
-        campaign_criteria = {
+    # Re-verify and re-score if profile details changed
+    email = normalized.get("contact_email")
+    if email and (update_data.get("contact_email") or not current_record.get("email_validation_status")):
+        verification = quality_service.verify_email(email)
+        normalized["email_validation_status"] = verification["status"]
+        
+    # Fetch campaign enrollment
+    campaign_data = None
+    try:
+        enroll_res = supabase.table("campaign_leads").select("campaign_id").eq("lead_id", id).execute()
+        if enroll_res.data:
+            camp_id = enroll_res.data[0]["campaign_id"]
+            camp_res = supabase.table("campaigns").select("*").eq("id", camp_id).execute()
+            if camp_res.data:
+                campaign_data = camp_res.data[0]
+    except Exception:
+        pass
+
+    if not campaign_data:
+        campaign_data = {
             "target_industries": ["construction", "hvac", "roofing", "masonry", "manufacturing"],
             "target_locations": ["usa", "canada"],
             "target_roles": ["sales", "owner", "partner", "founder", "manager"]
         }
-        score, reasons = quality_service.calculate_fit_score(normalized, campaign_criteria)
-        normalized["fit_score"] = score
-        normalized["fit_score_reasons"] = reasons
+
+    # Fetch research freshness
+    research_fresh = False
+    research_summary = ""
+    try:
+        r_res = supabase.table("research_snapshots").select("*").eq("lead_id", id).eq("research_type", "website").execute()
+        if r_res.data:
+            from datetime import datetime, timedelta
+            snap = r_res.data[0]
+            created_dt = datetime.fromisoformat(snap["created_at"].replace("Z", "+00:00"))
+            age = datetime.utcnow().replace(tzinfo=created_dt.tzinfo) - created_dt
+            if age < timedelta(days=7):
+                research_fresh = True
+            research_summary = json.loads(snap["structured_summary"]).get("summary", "")
+    except Exception:
+        pass
+
+    from app.services.personalization_context_service import PersonalizationContextService
+    score, reasons = PersonalizationContextService.calculate_explainable_fit_score(
+        lead=normalized,
+        campaign=campaign_data,
+        research_fresh=research_fresh,
+        research_summary=research_summary
+    )
+    normalized["fit_score"] = score
+    normalized["fit_score_reasons"] = reasons
 
     # Clean non-updatable audit fields
     for k in ["id", "user_id", "created_at", "updated_at"]:
@@ -361,18 +404,25 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
                     modified_count += 1
 
         elif action == "research":
-            # Performs a mock research enrichment, updating status
+            # Performs real website crawler research, updating status
             res = supabase.table("leads").select("id", "company_name", "website").eq("user_id", owner["id"]).in_("id", lead_ids).execute()
+            from app.services.website_research_service import WebsiteResearchService
             for item in res.data:
-                company = item.get("company_name") or "Business"
-                summary = f"Identified outreach triggers for {company} based on digital presence and market position."
-                context = f"Hello, noticed {company} has strong reviews but could improve their landing page conversion flow."
-                
-                supabase.table("leads").update({
-                    "research_status": "completed",
-                    "research_summary": summary,
-                    "personalization_context": context
-                }).eq("id", item["id"]).execute()
+                website = item.get("website")
+                if website:
+                    try:
+                        research_res = WebsiteResearchService.research_lead_website(item["id"], website, refresh=True)
+                        supabase.table("leads").update({
+                            "research_status": "completed",
+                            "research_summary": research_res["summary"],
+                            "personalization_context": json.dumps(research_res.get("personalization_facts") or [])
+                        }).eq("id", item["id"]).execute()
+                    except Exception as e:
+                        logger.error(f"Bulk research failed for lead {item['id']}: {e}")
+                        supabase.table("leads").update({
+                            "research_status": "failed",
+                            "research_summary": f"Research failed: {str(e)}"
+                        }).eq("id", item["id"]).execute()
                 modified_count += 1
 
         elif action == "archive":
@@ -388,3 +438,94 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
     except Exception as e:
         logger.error(f"Failed bulk action request: {e}")
         raise HTTPException(status_code=500, detail=f"Bulk action failed: {str(e)}")
+
+
+@router.post("/{id}/research")
+async def research_single_lead(
+    id: str, refresh: bool = Query(False), owner: dict = Depends(require_owner)
+):
+    """
+    Triggers public website research for a single lead.
+    """
+    lead = get_lead(id)
+    if not lead or lead.get("user_id") != owner["id"]:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    website = lead.get("website")
+    if not website:
+        raise HTTPException(status_code=400, detail="Lead website is missing")
+
+    from app.services.website_research_service import WebsiteResearchService
+    try:
+        supabase.table("leads").update({"research_status": "searching"}).eq("id", id).execute()
+        
+        research_res = WebsiteResearchService.research_lead_website(id, website, refresh=refresh)
+        
+        # Save structured summary to lead
+        supabase.table("leads").update({
+            "research_status": "completed",
+            "research_summary": research_res["summary"],
+            "personalization_context": json.dumps(research_res.get("personalization_facts") or [])
+        }).eq("id", id).execute()
+        
+        return research_res
+    except Exception as e:
+        logger.error(f"Research failed for lead {id}: {e}")
+        supabase.table("leads").update({
+            "research_status": "failed",
+            "research_summary": f"Research failed: {str(e)}"
+        }).eq("id", id).execute()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{id}/personalization-context")
+async def get_lead_personalization_context(
+    id: str = Path(..., description="Lead UUID"),
+    owner: dict = Depends(require_owner)
+):
+    """
+    Retrieves the compiled structured personalization context, warnings,
+    and explainable fit scores.
+    """
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database client offline")
+
+    # Fetch lead
+    existing = supabase.table("leads").select("*").eq("id", id).eq("user_id", owner["id"]).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail="Lead not found")
+        
+    lead_data = existing.data[0]
+
+    # Find campaign if lead enrolled
+    campaign_data = None
+    try:
+        enroll_res = supabase.table("campaign_leads").select("campaign_id").eq("lead_id", id).execute()
+        if enroll_res.data:
+            camp_id = enroll_res.data[0]["campaign_id"]
+            camp_res = supabase.table("campaigns").select("*").eq("id", camp_id).execute()
+            if camp_res.data:
+                campaign_data = camp_res.data[0]
+    except Exception:
+        pass
+
+    # Fetch sender settings (owner settings) if available
+    sender_settings = None
+    try:
+        set_res = supabase.table("owner_settings").select("*").eq("user_id", owner["id"]).execute()
+        if set_res.data:
+            sender_settings = set_res.data[0]
+    except Exception:
+        pass
+
+    from app.services.personalization_context_service import PersonalizationContextService
+    
+    # Compile
+    context_data = PersonalizationContextService.compile_context(
+        lead=lead_data,
+        campaign=campaign_data,
+        sender_settings=sender_settings
+    )
+
+    return context_data
+

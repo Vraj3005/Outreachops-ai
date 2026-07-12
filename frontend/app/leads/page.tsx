@@ -77,6 +77,17 @@ export default function LeadsPage() {
   // Custom fields viewer drawer
   const [customFieldsLead, setCustomFieldsLead] = useState<Lead | null>(null);
 
+  // Website Research states
+  const [researchLead, setResearchLead] = useState<Lead | null>(null);
+  const [isRefreshingResearch, setIsRefreshingResearch] = useState(false);
+  const [isEditingSummary, setIsEditingSummary] = useState(false);
+  const [editedSummaryText, setEditedSummaryText] = useState("");
+
+  const [compiledContext, setCompiledContext] = useState<any>(null);
+  const [loadingContext, setLoadingContext] = useState(false);
+  const [newLockedFact, setNewLockedFact] = useState("");
+  const [selectedExclusions, setSelectedExclusions] = useState<string[]>([]);
+
   // Bulk tag input states
   const [bulkTagInput, setBulkTagInput] = useState("");
   const [showBulkTagModal, setShowBulkTagModal] = useState(false);
@@ -320,6 +331,195 @@ export default function LeadsPage() {
     } catch (e) {
       console.error(e);
       toast("Error updating status", "error");
+    }
+  };
+
+  const handleRefreshResearch = async (leadId: string) => {
+    setIsRefreshingResearch(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${leadId}/research?refresh=true`, {
+        method: "POST"
+      });
+      if (res.ok) {
+        const data = await res.json();
+        toast("Website research refreshed successfully!");
+        
+        // Update local list
+        setLeads(prev => prev.map(l => {
+          if (l.id === leadId) {
+            return {
+              ...l,
+              research_status: "completed",
+              research_summary: data.summary,
+              personalization_context: JSON.stringify(data.personalization_facts)
+            };
+          }
+          return l;
+        }));
+        
+        // Update current drawer lead
+        setResearchLead(prev => {
+          if (prev && prev.id === leadId) {
+            return {
+              ...prev,
+              research_status: "completed",
+              research_summary: data.summary,
+              personalization_context: JSON.stringify(data.personalization_facts)
+            };
+          }
+          return prev;
+        });
+      } else {
+        toast("Failed to crawl website details", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Research connection failed", "error");
+    } finally {
+      setIsRefreshingResearch(false);
+    }
+  };
+
+  const handleSaveSummaryEdit = async (leadId: string) => {
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ research_summary: editedSummaryText })
+      });
+      if (res.ok) {
+        toast("Summary updated successfully!");
+        setIsEditingSummary(false);
+        // Update lists
+        setLeads(prev => prev.map(l => l.id === leadId ? { ...l, research_summary: editedSummaryText } : l));
+        setResearchLead(prev => prev && prev.id === leadId ? { ...prev, research_summary: editedSummaryText } : prev);
+      } else {
+        toast("Failed to update summary", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Save connection error", "error");
+    }
+  };
+
+  const _parseFacts = (factsStr: string | null): string[] => {
+    if (!factsStr) return [];
+    try {
+      const parsed = JSON.parse(factsStr);
+      if (Array.isArray(parsed)) return parsed;
+      return [factsStr];
+    } catch (e) {
+      return [factsStr];
+    }
+  };
+
+  const _parseSources = (lead: any): string[] => {
+    const sources = [lead.website];
+    return sources;
+  };
+
+  useEffect(() => {
+    if (researchLead) {
+      fetchPersonalizationContext(researchLead.id);
+    } else {
+      setCompiledContext(null);
+    }
+  }, [researchLead]);
+
+  const fetchPersonalizationContext = async (leadId: string) => {
+    setLoadingContext(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${leadId}/personalization-context`);
+      if (res.ok) {
+        const data = await res.json();
+        setCompiledContext(data);
+        setSelectedExclusions(data.personalization_context.excluded_fields || []);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingContext(false);
+    }
+  };
+
+  const handleAddLockedFact = async (leadId: string) => {
+    if (!newLockedFact.trim()) return;
+    const currentLocked = compiledContext?.personalization_context?.locked_facts || [];
+    const updatedLocked = [...currentLocked, newLockedFact.trim()];
+    
+    const updatedContextStr = JSON.stringify({
+      locked_facts: updatedLocked,
+      excluded_fields: selectedExclusions
+    });
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ personalization_context: updatedContextStr })
+      });
+      if (res.ok) {
+        toast("Manual fact locked successfully!");
+        setNewLockedFact("");
+        fetchPersonalizationContext(leadId);
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Error locking fact", "error");
+    }
+  };
+
+  const handleDeleteLockedFact = async (leadId: string, indexToRemove: number) => {
+    const currentLocked = compiledContext?.personalization_context?.locked_facts || [];
+    const updatedLocked = currentLocked.filter((_: any, idx: number) => idx !== indexToRemove);
+
+    const updatedContextStr = JSON.stringify({
+      locked_facts: updatedLocked,
+      excluded_fields: selectedExclusions
+    });
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ personalization_context: updatedContextStr })
+      });
+      if (res.ok) {
+        toast("Fact removed/unlocked successfully!");
+        fetchPersonalizationContext(leadId);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleExclusion = async (leadId: string, field: string) => {
+    let updatedExclusions = [...selectedExclusions];
+    if (updatedExclusions.includes(field)) {
+      updatedExclusions = updatedExclusions.filter(f => f !== field);
+    } else {
+      updatedExclusions.push(field);
+    }
+    setSelectedExclusions(updatedExclusions);
+
+    const currentLocked = compiledContext?.personalization_context?.locked_facts || [];
+    const updatedContextStr = JSON.stringify({
+      locked_facts: currentLocked,
+      excluded_fields: updatedExclusions
+    });
+
+    try {
+      const res = await fetch(`${API_URL}/api/v1/leads/${leadId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ personalization_context: updatedContextStr })
+      });
+      if (res.ok) {
+        toast("Generation exclusions updated!");
+        fetchPersonalizationContext(leadId);
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -831,6 +1031,18 @@ export default function LeadsPage() {
                             <Eye className="w-3.5 h-3.5" />
                           </button>
 
+                          {/* Personalization Research details button */}
+                          <button 
+                            onClick={() => {
+                              setResearchLead(lead);
+                              setIsEditingSummary(false);
+                            }}
+                            className="p-1 rounded hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700"
+                            title="View website research personalization details"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                          </button>
+
                           <button 
                             onClick={() => handleEditClick(lead)}
                             className="p-1 rounded hover:bg-zinc-100 text-zinc-400 hover:text-zinc-700"
@@ -1068,6 +1280,224 @@ export default function LeadsPage() {
                 </div>
               ) : (
                 <p className="text-zinc-400 text-xs text-center py-8">No custom column attributes mapped for this lead profile.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {researchLead && (
+        <div className="fixed inset-0 bg-zinc-950/40 backdrop-blur-sm z-50 flex items-center justify-center p-6 font-sans animate-fade-in">
+          <div className="max-w-xl w-full bg-white rounded-xl border border-zinc-200 overflow-hidden shadow-lg p-6 space-y-4 max-h-[90vh] flex flex-col">
+            <div className="flex justify-between items-center border-b border-zinc-100 pb-3">
+              <h3 className="font-bold text-zinc-950 text-xs">Website Personalization & Profile Context - {researchLead.company_name}</h3>
+              <button onClick={() => setResearchLead(null)} className="text-zinc-400 hover:text-zinc-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto space-y-4 text-xs pr-1">
+              {/* Status and Refresh */}
+              <div className="flex items-center justify-between bg-zinc-50 p-3 rounded-lg border border-zinc-200/50">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] uppercase font-bold text-zinc-400">Research Status:</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
+                    researchLead.research_status === "completed" 
+                      ? "bg-emerald-50 text-emerald-700 border border-emerald-100"
+                      : researchLead.research_status === "searching"
+                      ? "bg-indigo-50 text-indigo-700 border border-indigo-100 animate-pulse"
+                      : researchLead.research_status === "failed"
+                      ? "bg-rose-50 text-rose-700 border border-rose-100"
+                      : "bg-zinc-100 text-zinc-500 border border-zinc-200"
+                  }`}>
+                    {researchLead.research_status || "unchecked"}
+                  </span>
+                </div>
+                
+                <button
+                  onClick={() => handleRefreshResearch(researchLead.id)}
+                  disabled={isRefreshingResearch}
+                  className="inline-flex items-center gap-1 px-3 py-1 bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-white rounded text-[10px] font-bold shadow-sm transition-all"
+                >
+                  {isRefreshingResearch ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
+                  {isRefreshingResearch ? "Refreshing..." : "Refresh Research"}
+                </button>
+              </div>
+
+              {/* Explanatory Fit Score Panel */}
+              {compiledContext && (
+                <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] uppercase font-bold text-zinc-400">Campaign Profile Fit Score:</span>
+                    <span className="px-2 py-0.5 rounded bg-zinc-900 text-white text-[10px] font-black">{compiledContext.lead_fit_score}/100</span>
+                  </div>
+                  <div className="text-[10px] text-zinc-400 font-semibold leading-relaxed border-t border-zinc-200/50 pt-1">
+                    {compiledContext.human_readable_summary}
+                  </div>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {compiledContext.fit_score_reasons.map((reason: string, rIdx: number) => {
+                      const isWarning = reason.includes("WARNING");
+                      return (
+                        <div key={rIdx} className={`p-1.5 rounded text-[10px] flex gap-1 ${isWarning ? "bg-amber-50 text-amber-700 border border-amber-100" : "bg-white text-zinc-600 border border-zinc-200/50"}`}>
+                          <span>{reason}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Missing context warnings */}
+              {compiledContext && compiledContext.missing_context_warnings.length > 0 && (
+                <div className="space-y-1">
+                  <span className="text-[10px] uppercase font-bold text-amber-600 block tracking-wider font-sans">Diagnostics Warnings & Conflict Errors</span>
+                  <div className="space-y-1">
+                    {compiledContext.missing_context_warnings.map((w: string, wIdx: number) => (
+                      <div key={wIdx} className="bg-amber-50/50 border border-amber-100 text-amber-700 rounded p-2 text-[10px] font-medium leading-relaxed">
+                        {w}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Exclude fields configuration */}
+              <div className="space-y-2 bg-zinc-50 border border-zinc-200 rounded-lg p-3">
+                <span className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider font-sans">Exclude fields from AI generations</span>
+                <div className="grid grid-cols-3 gap-2">
+                  {["phone", "job_title", "contact_email", "industry"].map(f => {
+                    const isChecked = selectedExclusions.includes(f);
+                    return (
+                      <label key={f} className="flex items-center gap-1.5 cursor-pointer text-[10px] text-zinc-600 font-medium">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={() => handleToggleExclusion(researchLead.id, f)}
+                          className="rounded bg-white border border-zinc-200 focus:ring-0 text-zinc-900 w-3 h-3 cursor-pointer"
+                        />
+                        <span className="capitalize">{f.replace("_", " ")}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Summary (Editable) */}
+              <div className="space-y-1.5">
+                <label className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider font-sans">Concise Research Summary</label>
+                {isEditingSummary ? (
+                  <div className="space-y-2">
+                    <textarea
+                      value={editedSummaryText}
+                      onChange={e => setEditedSummaryText(e.target.value)}
+                      className="w-full h-24 p-2 border border-zinc-200 rounded text-xs focus:outline-none focus:border-zinc-950 font-medium font-sans leading-relaxed"
+                    />
+                    <div className="flex justify-end gap-1.5">
+                      <button
+                        onClick={() => setIsEditingSummary(false)}
+                        className="px-2.5 py-1 border border-zinc-200 rounded text-[10px]"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() => handleSaveSummaryEdit(researchLead.id)}
+                        className="px-2.5 py-1 bg-zinc-950 text-white rounded text-[10px] font-bold"
+                      >
+                        Save Changes
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg space-y-2">
+                    <p className="text-zinc-700 leading-relaxed font-medium font-sans">
+                      {researchLead.research_summary || "No research summary recorded for this prospect yet. Click refresh to begin crawlers."}
+                    </p>
+                    <button
+                      onClick={() => {
+                        setEditedSummaryText(researchLead.research_summary || "");
+                        setIsEditingSummary(true);
+                      }}
+                      className="text-[9px] text-indigo-600 hover:underline font-bold font-sans"
+                    >
+                      Edit Summary
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {/* Locked Personalization Overrides */}
+              <div className="space-y-2 bg-zinc-50 border border-zinc-200 rounded-lg p-3">
+                <span className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider font-sans">Locked Personalization facts overrides</span>
+                
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newLockedFact}
+                    onChange={e => setNewLockedFact(e.target.value)}
+                    placeholder="Lock a custom fact (e.g., 'uses Boston HVAC systems')"
+                    className="flex-1 px-3 py-1.5 border border-zinc-200 rounded text-[10px] focus:outline-none bg-white text-zinc-900"
+                  />
+                  <button
+                    onClick={() => handleAddLockedFact(researchLead.id)}
+                    className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-[10px] font-bold"
+                  >
+                    + Add Fact
+                  </button>
+                </div>
+
+                {compiledContext && compiledContext.personalization_context.locked_facts.length > 0 && (
+                  <div className="space-y-1.5 pt-1">
+                    {compiledContext.personalization_context.locked_facts.map((lf: string, idx: number) => (
+                      <div key={idx} className="flex justify-between items-center bg-white p-2 border border-zinc-200/50 rounded text-[10px] font-medium text-zinc-700">
+                        <span>{lf}</span>
+                        <button
+                          onClick={() => handleDeleteLockedFact(researchLead.id, idx)}
+                          className="text-rose-500 hover:underline text-[9px] font-bold"
+                        >
+                          Unlock
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Personalization Facts */}
+              {researchLead.personalization_context && (
+                <div className="space-y-2">
+                  <span className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider font-sans">Grounding Personalization Facts</span>
+                  <div className="max-h-40 overflow-y-auto space-y-1.5 font-sans">
+                    {_parseFacts(researchLead.personalization_context).map((fact: string, idx: number) => (
+                      <div key={idx} className="flex gap-2 items-start bg-zinc-50 p-2 border border-zinc-200/50 rounded-lg">
+                        <Check className="w-3.5 h-3.5 text-emerald-600 mt-0.5 shrink-0" />
+                        <span>{fact}</span>
+                      </div>
+                    ))}
+                    {_parseFacts(researchLead.personalization_context).length === 0 && (
+                      <div className="text-zinc-400 italic py-1 font-sans">No personalization facts extracted</div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Clickable Sources */}
+              {_parseSources(researchLead).length > 0 && (
+                <div className="space-y-1.5">
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider font-sans">Crawled Research Sources</label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {_parseSources(researchLead).map((src: string, idx: number) => (
+                      <a
+                        key={idx}
+                        href={src}
+                        target="_blank"
+                        className="px-2.5 py-1 text-[9px] bg-zinc-50 border border-zinc-200 rounded hover:bg-zinc-100 hover:border-zinc-300 text-indigo-600 flex items-center gap-1 transition-all"
+                      >
+                        {src.length > 30 ? src.substring(0, 30) + "..." : src}
+                        <ExternalLink className="w-2.5 h-2.5" />
+                      </a>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>
