@@ -208,8 +208,11 @@ class DurableSendingWorker:
             return False, "Associated lead status is marked Archived"
 
         # E. Recipient validity
-        email_str = lead.get("contact_email") or ""
-        if "@" not in email_str or "." not in email_str:
+        email_str = (lead.get("contact_email") or "").strip()
+        email_str = email_str.replace("\r", "").replace("\n", "")
+        import re
+        email_regex = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
+        if not re.match(email_regex, email_str):
             return False, f"Invalid recipient email formatting: '{email_str}'"
 
         # F. Not DNC check
@@ -305,7 +308,8 @@ class DurableSendingWorker:
         subject = draft["subject"]
         body = draft["body"]
 
-        # Prevent header injection: strip CR/LF
+        # Prevent header injection: strip CR/LF from recipient and subject
+        clean_recipient = recipient.replace("\r", "").replace("\n", "").strip()
         clean_subject = subject.replace("\r", "").replace("\n", "")
 
         gmail_message_id = None
@@ -314,14 +318,14 @@ class DurableSendingWorker:
         if settings.DEMO_MODE:
             gmail_message_id = f"demo_msg_{job['id']}_{int(time.time())}"
             gmail_thread_id = f"demo_thread_{job['id']}"
-            logger.info(f"[Demo Mode] Dispatched email to {recipient} (ID: {gmail_message_id})")
+            logger.info(f"[Demo Mode] Dispatched email to {clean_recipient} (ID: {gmail_message_id})")
         else:
             # Refresh connection
             gmail_service.check_connection_status(user_id)
             gmail_client = gmail_service._get_gmail_client(user_id)
 
             message = MIMEMultipart()
-            message["to"] = recipient
+            message["to"] = clean_recipient
             message["subject"] = clean_subject
             message.attach(MIMEText(body, "plain", "utf-8"))
 

@@ -57,6 +57,15 @@ def test_pinned_dns_context():
 
 # --- 4. Rebound / Localhost Redirect Block Tests ---
 
+def test_safe_fetch_rejects_non_standard_ports():
+    with pytest.raises(ValueError, match="Only standard HTTP/HTTPS ports"):
+        safe_fetch("http://good-site.com:8080")
+    with pytest.raises(ValueError, match="Only standard HTTP/HTTPS ports"):
+        safe_fetch("https://good-site.com:8443")
+    with pytest.raises(ValueError, match="Only standard HTTP/HTTPS ports"):
+        safe_fetch("http://good-site.com:22")
+
+
 @mock.patch("socket.getaddrinfo")
 def test_safe_fetch_rejects_private_ips(mock_getaddrinfo):
     mock_getaddrinfo.return_value = [

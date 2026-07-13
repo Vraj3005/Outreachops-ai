@@ -310,6 +310,15 @@ async def trigger_manual_reply_sync(owner: dict = Depends(require_owner)):
     """
     Triggers manual sync pull of Gmail inbox history events.
     """
+    from app.services.rate_limit_service import RateLimitService
+    limiter = RateLimitService()
+    limit_key = f"rate_limit:sync_replies:{owner['id']}"
+    if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many reply sync requests. Please try again later.",
+        )
+
     from app.services.gmail_sync_service import GmailSyncService
     try:
         GmailSyncService.sync_user_replies(owner["id"])

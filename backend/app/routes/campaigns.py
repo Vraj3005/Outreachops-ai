@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 
 from app.crud.campaigns import (
     create_campaign,
@@ -12,6 +12,7 @@ from app.crud.campaigns import (
 from app.database import supabase
 from app.schemas.campaign import Campaign, CampaignBase, CampaignCreate, CampaignUpdate
 from app.utils.auth import require_owner
+from app.services.audit_log_service import AuditLogService
 
 logger = logging.getLogger("outreachops.routes.campaigns")
 
@@ -64,7 +65,7 @@ async def read_active_campaign(owner: dict = Depends(require_owner)):
 
 @router.post("", response_model=Campaign)
 async def create_campaign_endpoint(
-    payload_in: CampaignBase, owner: dict = Depends(require_owner)
+    payload_in: CampaignBase, request: Request, owner: dict = Depends(require_owner)
 ):
     """
     Create a new outreach campaign.
@@ -82,6 +83,13 @@ async def create_campaign_endpoint(
     res = create_campaign(payload)
     if not res:
         raise HTTPException(status_code=500, detail="Failed to create campaign")
+    
+    AuditLogService.log_event(
+        user_id=owner["id"],
+        action="create_campaign",
+        details=f"Created campaign '{payload.name}' (ID: {res['id']})",
+        request=request
+    )
     return Campaign(**res)
 
 
@@ -89,6 +97,7 @@ async def create_campaign_endpoint(
 async def update_campaign_endpoint(
     id: str = Path(..., description="Campaign UUID"),
     payload: CampaignUpdate = None,
+    request: Request = None,
     owner: dict = Depends(require_owner),
 ):
     """
@@ -96,6 +105,11 @@ async def update_campaign_endpoint(
     """
     if not payload:
         raise HTTPException(status_code=400, detail="Payload is required")
+
+    from app.crud.campaigns import get_campaign
+    existing = get_campaign(id)
+    if not existing or existing.get("user_id") != owner["id"]:
+        raise HTTPException(status_code=404, detail=f"Campaign '{id}' not found")
 
     # If activating this campaign, deactivate other campaigns
     if payload.status == "active" and supabase:
@@ -109,22 +123,42 @@ async def update_campaign_endpoint(
     res = update_campaign(id, payload)
     if not res:
         raise HTTPException(status_code=404, detail=f"Campaign '{id}' not found")
+
+    AuditLogService.log_event(
+        user_id=owner["id"],
+        action="update_campaign",
+        details=f"Updated campaign '{res.get('name')}' (ID: {id})",
+        request=request
+    )
     return Campaign(**res)
 
 
 @router.delete("/{id}")
 async def delete_campaign_endpoint(
     id: str = Path(..., description="Campaign UUID"),
+    request: Request = None,
     owner: dict = Depends(require_owner),
 ):
     """
     Delete a campaign.
     """
+    from app.crud.campaigns import get_campaign
+    existing = get_campaign(id)
+    if not existing or existing.get("user_id") != owner["id"]:
+        raise HTTPException(status_code=404, detail="Campaign not found or deletion failed")
+
     success = delete_campaign(id)
     if not success:
         raise HTTPException(
             status_code=404, detail="Campaign not found or deletion failed"
         )
+    
+    AuditLogService.log_event(
+        user_id=owner["id"],
+        action="delete_campaign",
+        details=f"Deleted campaign ID: {id}",
+        request=request
+    )
     return {"message": "Campaign deleted successfully"}
 
 

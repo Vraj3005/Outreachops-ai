@@ -46,11 +46,14 @@ class SafeTemplateRenderer:
 
             val = cls._resolve_path(var_path, context)
             if val is not None and str(val).strip() != "":
+                sanitized_val = cls.sanitize_value(var_path, val)
                 used.add(var_path)
-                rendered = rendered.replace(placeholder, str(val))
+                rendered = rendered.replace(placeholder, sanitized_val)
             else:
                 if fallback is not None:
-                    rendered = rendered.replace(placeholder, fallback)
+                    # Sanitize fallback value as well
+                    sanitized_fallback = cls.sanitize_value(var_path, fallback)
+                    rendered = rendered.replace(placeholder, sanitized_fallback)
                 else:
                     missing.add(var_path)
                     rendered = rendered.replace(placeholder, "")
@@ -109,6 +112,51 @@ class SafeTemplateRenderer:
 
         is_valid = len(errors) == 0 and len(unknown_variables) == 0
         return is_valid, errors, detected_variables, unknown_variables
+
+    @classmethod
+    def sanitize_value(cls, var_path: str, val: Any) -> str:
+        if val is None:
+            return ""
+        val_str = str(val)
+        
+        # 1. Cap maximum lengths per field category
+        if var_path.startswith("research."):
+            max_len = 5000
+        elif var_path.startswith("custom."):
+            max_len = 2000
+        else:
+            max_len = 500
+            
+        if len(val_str) > max_len:
+            val_str = val_str[:max_len]
+            
+        # 2. If it's research/custom, strip existing XML tag boundaries to prevent escaping
+        if var_path.startswith("research.") or var_path.startswith("custom."):
+            val_str = re.sub(r"</?[a-zA-Z0-9_\.\-]+>", "", val_str)
+            val_str = val_str.replace("-->", "").replace("]]>", "")
+            
+        # 3. For short text fields, strip newlines, carriage returns, and instruction command phrases
+        short_fields = {
+            "first_name", "last_name", "full_name", "company_name", "job_title", 
+            "contact_email", "website", "industry", "country", "city",
+            "sender.name", "sender.company", "sender.website", "sender.phone"
+        }
+        if var_path in short_fields:
+            val_str = val_str.replace("\n", " ").replace("\r", " ")
+            injection_commands = [
+                "ignore previous", "system instruction", "system prompt",
+                "override rules", "forget instructions", "you must output",
+                "hacked", "hack"
+            ]
+            for cmd in injection_commands:
+                val_str = re.sub(re.escape(cmd), "", val_str, flags=re.IGNORECASE)
+                
+        # 4. Wrap research in XML tag boundaries
+        if var_path.startswith("research."):
+            tag_name = var_path.replace(".", "_")
+            val_str = f"<{tag_name}>{val_str}</{tag_name}>"
+            
+        return val_str
 
     @classmethod
     def _resolve_path(cls, path: str, context: Dict[str, Any]) -> Any:

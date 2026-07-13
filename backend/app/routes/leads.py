@@ -277,6 +277,14 @@ async def export_leads(
         res = query.execute()
         leads_data = res.data or []
 
+        def escape_csv_val(val):
+            if val is None:
+                return ""
+            val_str = str(val)
+            if val_str and val_str[0] in ['=', '+', '-', '@']:
+                return "'" + val_str
+            return val
+
         # Generate CSV in memory
         output = io.StringIO()
         writer = csv.writer(output)
@@ -294,7 +302,7 @@ async def export_leads(
         for l in leads_data:
             tags_str = ", ".join(l.get("tags") or [])
             cf_str = json.dumps(l.get("custom_fields") or {})
-            writer.writerow([
+            row_data = [
                 l.get("id"),
                 l.get("first_name"),
                 l.get("last_name"),
@@ -316,7 +324,9 @@ async def export_leads(
                 l.get("fit_score"),
                 l.get("email_validation_status"),
                 l.get("created_at")
-            ])
+            ]
+            escaped_row = [escape_csv_val(cell) for cell in row_data]
+            writer.writerow(escaped_row)
 
         output.seek(0)
         return StreamingResponse(
@@ -342,6 +352,30 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
     lead_ids = payload.lead_ids
     params = payload.params or {}
 
+    # Validate that all lead IDs belong to the authenticated owner
+    try:
+        valid_res = supabase.table("leads").select("id").eq("user_id", owner["id"]).in_("id", lead_ids).execute()
+        valid_lead_ids = [row["id"] for row in (valid_res.data or [])]
+    except Exception as e:
+        logger.error(f"Failed to validate lead ownership in bulk action: {e}")
+        raise HTTPException(status_code=500, detail="Database access error during validation")
+
+    if not valid_lead_ids:
+        raise HTTPException(status_code=404, detail="No authorized leads found to process")
+
+    # If campaign_id is provided, validate it belongs to the owner
+    campaign_id = params.get("campaign_id")
+    if campaign_id:
+        try:
+            camp_check = supabase.table("campaigns").select("id").eq("id", campaign_id).eq("user_id", owner["id"]).execute()
+            if not camp_check.data:
+                raise HTTPException(status_code=403, detail="Unauthorized campaign access")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Failed to validate campaign ownership in bulk action: {e}")
+            raise HTTPException(status_code=500, detail="Database access error during validation")
+
     modified_count = 0
 
     try:
@@ -349,7 +383,7 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
             tags_to_add = [t.strip().lower() for t in params.get("tags", []) if str(t).strip()]
             if tags_to_add:
                 # Fetch target leads
-                res = supabase.table("leads").select("id", "tags").eq("user_id", owner["id"]).in_("id", lead_ids).execute()
+                res = supabase.table("leads").select("id", "tags").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
                 for item in res.data:
                     current_tags = item.get("tags") or []
                     updated_tags = sorted(list(set(current_tags + tags_to_add)))
@@ -359,7 +393,7 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
         elif action == "remove_tags":
             tags_to_remove = [t.strip().lower() for t in params.get("tags", []) if str(t).strip()]
             if tags_to_remove:
-                res = supabase.table("leads").select("id", "tags").eq("user_id", owner["id"]).in_("id", lead_ids).execute()
+                res = supabase.table("leads").select("id", "tags").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
                 for item in res.data:
                     current_tags = item.get("tags") or []
                     updated_tags = sorted([t for t in current_tags if t not in tags_to_remove])
@@ -367,12 +401,8 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
                     modified_count += 1
 
         elif action == "enroll_campaign":
-            campaign_id = params.get("campaign_id")
-            if not campaign_id:
-                raise HTTPException(status_code=400, detail="Missing campaign_id parameter")
-            
             # Enrolls in campaign_leads mapping table
-            for lid in lead_ids:
+            for lid in valid_lead_ids:
                 try:
                     enroll_payload = {
                         "campaign_id": campaign_id,
@@ -387,15 +417,11 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
                     pass
 
         elif action == "disenroll_campaign":
-            campaign_id = params.get("campaign_id")
-            if not campaign_id:
-                raise HTTPException(status_code=400, detail="Missing campaign_id parameter")
-            
-            res = supabase.table("campaign_leads").delete().eq("campaign_id", campaign_id).in_("lead_id", lead_ids).execute()
+            res = supabase.table("campaign_leads").delete().eq("campaign_id", campaign_id).in_("lead_id", valid_lead_ids).execute()
             modified_count = len(res.data or [])
 
         elif action == "revalidate":
-            res = supabase.table("leads").select("id", "contact_email").eq("user_id", owner["id"]).in_("id", lead_ids).execute()
+            res = supabase.table("leads").select("id", "contact_email").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
             for item in res.data:
                 email = item.get("contact_email")
                 if email:
@@ -405,7 +431,16 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
 
         elif action == "research":
             # Performs real website crawler research, updating status
-            res = supabase.table("leads").select("id", "company_name", "website").eq("user_id", owner["id"]).in_("id", lead_ids).execute()
+            from app.services.rate_limit_service import RateLimitService
+            limiter = RateLimitService()
+            limit_key = f"rate_limit:leads_research:{owner['id']}"
+            if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many research requests. Please try again later.",
+                )
+
+            res = supabase.table("leads").select("id", "company_name", "website").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
             from app.services.website_research_service import WebsiteResearchService
             for item in res.data:
                 website = item.get("website")
@@ -426,7 +461,7 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
                 modified_count += 1
 
         elif action == "archive":
-            for lid in lead_ids:
+            for lid in valid_lead_ids:
                 supabase.table("leads").update({"lead_status": "Archived"}).eq("id", lid).execute()
                 modified_count += 1
 
@@ -447,6 +482,15 @@ async def research_single_lead(
     """
     Triggers public website research for a single lead.
     """
+    from app.services.rate_limit_service import RateLimitService
+    limiter = RateLimitService()
+    limit_key = f"rate_limit:leads_research:{owner['id']}"
+    if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many research requests. Please try again later.",
+        )
+
     lead = get_lead(id)
     if not lead or lead.get("user_id") != owner["id"]:
         raise HTTPException(status_code=404, detail="Lead not found")

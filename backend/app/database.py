@@ -1,5 +1,6 @@
 import logging
 import os
+import re
 import sqlite3
 import uuid
 from typing import Any
@@ -8,6 +9,14 @@ from app.config import settings
 from supabase import create_client
 
 logger = logging.getLogger("outreachops.database")
+
+
+def validate_identifier(name: str) -> str:
+    if not isinstance(name, str):
+        raise ValueError("Identifier must be a string")
+    if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?$", name):
+        raise ValueError(f"Invalid database identifier: {name}")
+    return name
 
 
 class SQLiteSupabaseResult:
@@ -65,6 +74,22 @@ class SQLiteQueryBuilder:
         self.filters.append((column, ">=", value))
         return self
 
+    def lt(self, column, value):
+        self.filters.append((column, "<", value))
+        return self
+
+    def gt(self, column, value):
+        self.filters.append((column, ">", value))
+        return self
+
+    def lte(self, column, value):
+        self.filters.append((column, "<=", value))
+        return self
+
+    def in_(self, column, values):
+        self.filters.append((column, "in", values))
+        return self
+
     def order(self, column, desc=False):
         self.orders.append((column, "DESC" if desc else "ASC"))
         return self
@@ -74,6 +99,37 @@ class SQLiteQueryBuilder:
         return self
 
     def execute(self):
+        # Validate table name
+        validate_identifier(self.table_name)
+
+        # Validate limit_val if set
+        if self.limit_val is not None:
+            try:
+                self.limit_val = int(self.limit_val)
+            except ValueError:
+                raise ValueError(f"Invalid LIMIT value: {self.limit_val}")
+
+        # Validate filters
+        if self.filters:
+            for col, op, val in self.filters:
+                validate_identifier(col)
+                if op.lower() not in {"=", "!=", "<", ">", "<=", ">=", "like", "in", "is", "is not"}:
+                    raise ValueError(f"Invalid database operator: {op}")
+
+        # Validate orders
+        if self.orders:
+            for col, direction in self.orders:
+                validate_identifier(col)
+                if direction.upper() not in {"ASC", "DESC"}:
+                    raise ValueError(f"Invalid sorting direction: {direction}")
+
+        # Validate payload columns for insert/update/upsert
+        if self.payload:
+            payloads = self.payload if isinstance(self.payload, list) else [self.payload]
+            for p in payloads:
+                for col in p.keys():
+                    validate_identifier(col)
+
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
@@ -890,6 +946,26 @@ class SQLiteSupabaseClient:
                     ),
                 )
 
+        # rate_limits table for fallback rate limiting
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            id TEXT PRIMARY KEY,
+            key TEXT UNIQUE NOT NULL,
+            value INTEGER NOT NULL,
+            expires_at TEXT NOT NULL
+        )""")
+
+        # security_audit_logs table for audit trail
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS security_audit_logs (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT,
+            ip_address TEXT,
+            timestamp TEXT NOT NULL
+        )""")
+
         conn.commit()
         conn.close()
 
@@ -898,6 +974,14 @@ class SQLiteSupabaseClient:
 
 
 def init_db() -> Any:
+    # Force local SQLite database during test runs for state isolation
+    if os.getenv("ENV") == "test":
+        db_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "local_outreachops.db"
+        )
+        logger.info(f"📂 [Test Mode] Initializing local SQLite database at: {db_path}")
+        return SQLiteSupabaseClient(db_path)
+
     url = settings.SUPABASE_URL
     key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_ANON_KEY
 

@@ -46,7 +46,33 @@ async def parse_import_source(
     Parses CSV/XLSX file uploads or fetches Google Sheets tabs.
     Returns headers, sample rows, and file fingerprint.
     """
+    from app.services.rate_limit_service import RateLimitService
+    limiter = RateLimitService()
+    limit_key = f"rate_limit:imports_parse:{owner['id']}"
+    if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many import requests. Please try again later.",
+        )
+
     if file:
+        filename = file.filename or ""
+        ext = filename.split(".")[-1].lower() if "." in filename else ""
+        if ext not in ["csv", "xlsx"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file extension. Only CSV and XLSX are supported."
+            )
+        
+        content_type = file.content_type or ""
+        allowed_mimes = ["text/csv", "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"]
+        # Skip check if content_type is blank (fallback)
+        if content_type and not any(mime in content_type.lower() for mime in allowed_mimes):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid file MIME type. Only CSV and XLSX are supported."
+            )
+
         try:
             contents = await file.read()
             res = import_service.parse_file(contents, file.filename)

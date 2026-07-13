@@ -76,6 +76,15 @@ async def generate_drafts(
     """
     Generate ERP email drafts for a lead using Gemini API.
     """
+    from app.services.rate_limit_service import RateLimitService
+    limiter = RateLimitService()
+    limit_key = f"rate_limit:drafts_generate:{owner['id']}"
+    if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many email generation requests. Please try again later.",
+        )
+
     lead_id = payload.lead_id
     regenerate = payload.regenerate
 
@@ -550,6 +559,13 @@ async def send_draft_endpoint(
 
     gmail_service = GmailService()
     rate_limit_service = RateLimitService()
+
+    limit_key = f"rate_limit:send_draft:{owner['id']}"
+    if rate_limit_service.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many send requests. Please try again later.",
+        )
 
     # 1. Fetch Draft Details & Verify Ownership
     draft = get_draft(id)

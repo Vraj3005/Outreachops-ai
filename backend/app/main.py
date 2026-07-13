@@ -69,14 +69,38 @@ app = FastAPI(
 # Register custom exception handler middleware
 register_error_handlers(app)
 
-# CORS Middleware config
+# Secure CORS Middleware config
+frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+origins = [orig.strip() for orig in frontend_url.split(",") if orig.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this to the frontend URL
+    allow_origins=origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With", "Accept"],
 )
+
+from fastapi import Request
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https:; "
+        "frame-ancestors 'none';"
+    )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    if os.getenv("ENV", "development").lower() == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
 
 # Register API routers
 app.include_router(health.router, prefix="/api/v1")

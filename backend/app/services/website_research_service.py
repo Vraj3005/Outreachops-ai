@@ -84,6 +84,10 @@ def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
     if parsed.scheme not in ["http", "https"]:
         raise ValueError(f"Invalid URI scheme: '{parsed.scheme}'. Only HTTP/HTTPS are allowed.")
 
+    # Restrict allowed ports to 80 and 443 to prevent scanning internal services
+    if parsed.port is not None and parsed.port not in [80, 443]:
+        raise ValueError(f"Invalid URL port: '{parsed.port}'. Only standard HTTP/HTTPS ports (80/443) are allowed.")
+
     current_url = url
     max_redirects = 3
 

@@ -107,8 +107,8 @@ async def retry_scheduled_email(
     Resets failed outbox items back to pending status.
     """
     try:
-        # Check job
-        job_res = supabase.table("scheduled_emails").select("*").eq("id", id).execute()
+        # Check job and verify ownership
+        job_res = supabase.table("scheduled_emails").select("*").eq("id", id).eq("user_id", owner["id"]).execute()
         if not job_res.data:
             raise HTTPException(status_code=404, detail="Scheduled email job not found")
         job = job_res.data[0]
@@ -132,6 +132,8 @@ async def retry_scheduled_email(
         }).eq("campaign_id", job["campaign_id"]).eq("lead_id", job["lead_id"]).execute()
 
         return {"status": "success", "message": "Email job reset to pending."}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -145,11 +147,18 @@ async def cancel_scheduled_email(
     Cancels a scheduled or pending email.
     """
     try:
+        # Check job and verify ownership
+        job_res = supabase.table("scheduled_emails").select("*").eq("id", id).eq("user_id", owner["id"]).execute()
+        if not job_res.data:
+            raise HTTPException(status_code=404, detail="Scheduled email job not found")
+
         supabase.table("scheduled_emails").update({
             "status": "cancelled",
             "updated_at": datetime.datetime.now(datetime.UTC).isoformat()
         }).eq("id", id).execute()
         return {"status": "success", "message": "Scheduled email cancelled."}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

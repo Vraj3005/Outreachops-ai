@@ -42,11 +42,33 @@ class ImportService:
     def get_cache_path(self, fingerprint: str) -> str:
         return os.path.join(self.scratch_dir, f"temp_import_{fingerprint}.json")
 
+    def cleanup_expired_cache(self):
+        """Clean up temp JSON files in scratch directory older than 1 hour."""
+        import time
+        now = time.time()
+        one_hour_sec = 3600
+        try:
+            if os.path.exists(self.scratch_dir):
+                for filename in os.listdir(self.scratch_dir):
+                    if filename.startswith("temp_import_") and filename.endswith(".json"):
+                        filepath = os.path.join(self.scratch_dir, filename)
+                        file_mod_time = os.path.getmtime(filepath)
+                        if (now - file_mod_time) > one_hour_sec:
+                            try:
+                                os.remove(filepath)
+                                logger.info(f"Cleaned up expired import cache file: {filename}")
+                            except Exception:
+                                pass
+        except Exception as e:
+            logger.warning(f"Error cleaning up import cache files: {e}")
+
     def parse_file(self, contents: bytes, file_name: str) -> Dict[str, Any]:
         """
         Parses CSV or XLSX bytes. Limits size, columns, rows, and cell length.
         Saves parsed raw data into scratch JSON file named by MD5 fingerprint.
         """
+        self.cleanup_expired_cache()
+
         # Limit file size < 10MB
         if len(contents) > 10 * 1024 * 1024:
             raise ValueError("File size exceeds maximum limit of 10MB.")
@@ -448,6 +470,14 @@ class ImportService:
         with open(log_cache_path, "r", encoding="utf-8") as f:
             row_logs = json.load(f)
 
+        def escape_csv_val(val):
+            if val is None:
+                return ""
+            val_str = str(val)
+            if val_str and val_str[0] in ['=', '+', '-', '@']:
+                return "'" + val_str
+            return val
+
         output = io.StringIO()
         writer = csv.writer(output)
         
@@ -461,7 +491,8 @@ class ImportService:
                 cells = log["original_cells"]
                 # Align values
                 cells = list(cells) + [""] * max(0, len(headers) - len(cells))
-                writer.writerow([row_num] + cells + [err_text])
+                escaped_cells = [escape_csv_val(c) for c in cells]
+                writer.writerow([row_num] + escaped_cells + [escape_csv_val(err_text)])
 
         return output.getvalue()
 

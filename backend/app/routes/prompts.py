@@ -346,6 +346,15 @@ async def test_prompt_simulation(
     Simulates variable context compile rendering and Gemini structured output generation on a lead.
     Does not save generated drafts into DB.
     """
+    from app.services.rate_limit_service import RateLimitService
+    limiter = RateLimitService()
+    limit_key = f"rate_limit:prompts_test:{owner['id']}"
+    if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many prompt simulation test requests. Please try again later.",
+        )
+
     # 1. Fetch target Lead
     lead = get_lead(payload.lead_id)
     if not lead or lead.get("user_id") != owner["id"]:

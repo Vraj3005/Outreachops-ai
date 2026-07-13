@@ -32,7 +32,7 @@ def test_gemini_model_fallback_transient(mocker):
     class MockResponse:
         text = "SUBJECT: Proposal for Apex\nBODY:\nHello Team"
 
-    def mock_generate_content(model, contents):
+    def mock_generate_content(model, contents, **kwargs):
         if model == "model-1":
             raise Exception("Resource exhausted (429 Rate Limit hit)")
         elif model == "model-2":
