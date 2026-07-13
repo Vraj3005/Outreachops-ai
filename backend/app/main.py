@@ -43,8 +43,13 @@ from app.services.error_service import register_error_handlers
 async def lifespan(app: FastAPI):
     # Startup actions
     init_db()
+    
+    from app.services.generation_worker import GenerationWorker
+    GenerationWorker.start()
+    
     yield
-    # Shutdown actions (if any)
+    # Shutdown actions
+    GenerationWorker.stop()
 
 
 app = FastAPI(

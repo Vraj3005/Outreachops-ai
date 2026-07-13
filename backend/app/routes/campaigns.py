@@ -381,3 +381,139 @@ async def preview_campaign_drafts(
         previews.append(PreviewDraftResponse(subject=subject, body=body))
     return previews
 
+
+class CreateJobRequest(BaseModel):
+    lead_ids: Optional[list[str]] = None
+    sample_only: bool = False
+    regenerate: bool = False
+    prompt_version_id: Optional[str] = None
+    model_override_config: Optional[dict[str, Any]] = None
+
+
+@router.post("/{id}/jobs")
+async def trigger_campaign_generation_job(
+    id: str,
+    payload: CreateJobRequest,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Spawns an asynchronous batch generation job for target leads in the campaign.
+    """
+    from app.services.generation_job_service import GenerationJobService
+    try:
+        job = GenerationJobService.create_generation_job(
+            campaign_id=id,
+            user_id=owner["id"],
+            lead_ids=payload.lead_ids,
+            sample_only=payload.sample_only,
+            regenerate=payload.regenerate,
+            prompt_version_id=payload.prompt_version_id,
+            model_config=payload.model_override_config
+        )
+        return job
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to spawn job: {e}")
+
+
+@router.get("/{id}/jobs")
+async def list_campaign_generation_jobs(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Lists historical generation jobs spawned for this campaign.
+    """
+    res = supabase.table("generation_jobs").select("*").eq("campaign_id", id).eq("user_id", owner["id"]).order("created_at", desc=True).execute()
+    return res.data or []
+
+
+@router.get("/jobs/{job_id}")
+async def get_job_details(
+    job_id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Retrieves status counts and configuration snapshots for a specific job.
+    """
+    # Force sync before returning status
+    from app.services.generation_job_service import GenerationJobService
+    try:
+        GenerationJobService.sync_job_counts(job_id)
+    except Exception:
+        pass
+
+    res = supabase.table("generation_jobs").select("*").eq("id", job_id).eq("user_id", owner["id"]).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return res.data[0]
+
+
+@router.get("/jobs/{job_id}/items")
+async def list_job_items(
+    job_id: str,
+    status: Optional[str] = None,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Retrieves individual execution items queued under the job.
+    """
+    # Verify owner has access to job
+    job_res = supabase.table("generation_jobs").select("id").eq("id", job_id).eq("user_id", owner["id"]).execute()
+    if not job_res.data:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    query = supabase.table("generation_job_items").select("*").eq("job_id", job_id)
+    if status:
+        query = query.eq("status", status)
+    
+    res = query.order("created_at").execute()
+    return res.data or []
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(
+    job_id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Cancels pending items queued in the job.
+    """
+    from app.services.generation_job_service import GenerationJobService
+    try:
+        return GenerationJobService.cancel_generation_job(job_id, owner["id"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/jobs/{job_id}/retry")
+async def retry_failed_items(
+    job_id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Retries failed or cancelled items within the job.
+    """
+    from app.services.generation_job_service import GenerationJobService
+    try:
+        return GenerationJobService.retry_job_failures(job_id, owner["id"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/jobs/{job_id}/resume")
+async def resume_stalled_job(
+    job_id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Resumes stalled items in processing/pending state.
+    """
+    from app.services.generation_job_service import GenerationJobService
+    try:
+        return GenerationJobService.resume_job(job_id, owner["id"])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+

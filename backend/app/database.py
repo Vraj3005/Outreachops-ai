@@ -726,6 +726,27 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "owner_settings", "offer_description", "TEXT")
         self._add_column_if_missing(cursor, "owner_settings", "default_target_audience", "TEXT")
 
+        # Alter Generation Jobs Table
+        self._add_column_if_missing(cursor, "generation_jobs", "total", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "generation_jobs", "queued", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "generation_jobs", "processing", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "generation_jobs", "completed", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "generation_jobs", "failed", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "generation_jobs", "cancelled", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "generation_jobs", "model_configuration_snapshot", "TEXT", "'{}'")
+        self._add_column_if_missing(cursor, "generation_jobs", "prompt_version", "TEXT")
+
+        # Alter Generation Job Items Table
+        self._add_column_if_missing(cursor, "generation_job_items", "sequence_step_id", "TEXT")
+        self._add_column_if_missing(cursor, "generation_job_items", "attempts", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "generation_job_items", "error_type", "TEXT")
+        self._add_column_if_missing(cursor, "generation_job_items", "resulting_draft_id", "TEXT")
+        self._add_column_if_missing(cursor, "generation_job_items", "idempotency_key", "TEXT")
+
+        # Alter Email Drafts Table
+        self._add_column_if_missing(cursor, "email_drafts", "campaign_id", "TEXT")
+        self._add_column_if_missing(cursor, "email_drafts", "generation_job_id", "TEXT")
+
         # --- V2 DATA MIGRATIONS ---
         # 1. Migrate leads website_pain_points & erp_approach to custom_fields
         cursor.execute(

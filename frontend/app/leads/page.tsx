@@ -135,6 +135,12 @@ export default function LeadsPage() {
   const [genFailures, setGenFailures] = useState<{ company: string; error: string }[]>([]);
   const [generateForAll, setGenerateForAll] = useState(false);
 
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [activeJob, setActiveJob] = useState<any>(null);
+  const [activeJobItems, setActiveJobItems] = useState<any[]>([]);
+  const [selectedJobCampaignId, setSelectedJobCampaignId] = useState("");
+  const [isSampleRun, setIsSampleRun] = useState(false);
+
   // Fetch campaigns
   useEffect(() => {
     const fetchCampaigns = async () => {
@@ -651,61 +657,127 @@ export default function LeadsPage() {
 
   // Bulk email generation worker
   const executeBulkGeneration = async () => {
+    if (!selectedJobCampaignId) {
+      toast("Please select a campaign first", "error");
+      return;
+    }
+    
     setIsGenerating(true);
-    setGenProgress(0);
-    setGenSuccessCount(0);
     setGenFailures([]);
+    setGenSuccessCount(0);
+    setGenProgress(0);
+    
+    const leadIds = generateForAll ? null : Array.from(selectedIds);
 
-    const selectedList = generateForAll ? leads : leads.filter(l => selectedIds.has(l.id));
-    let successCount = 0;
-    const failuresList: typeof genFailures = [];
+    try {
+      const res = await fetch(`${API_URL}/api/v1/campaigns/${selectedJobCampaignId}/jobs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          lead_ids: leadIds,
+          sample_only: isSampleRun,
+          regenerate: genRegenerate
+        })
+      });
 
-    for (let i = 0; i < selectedList.length; i++) {
-      const lead = selectedList[i];
-      setGenProgress(i + 1);
+      if (res.ok) {
+        const job = await res.json();
+        setActiveJobId(job.id);
+        setActiveJob(job);
+        toast("Generation job spawned successfully!");
+      } else {
+        const err = await res.json();
+        toast(err.detail || "Failed to start generation job", "error");
+        setIsGenerating(false);
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Connection error when starting job", "error");
+      setIsGenerating(false);
+    }
+  };
 
+  useEffect(() => {
+    if (!activeJobId) return;
+
+    let timer: any = null;
+
+    const poll = async () => {
       try {
-        const res = await fetch(`${API_URL}/api/v1/drafts/generate`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lead_id: lead.id,
-            email_type: genType,
-            regenerate: genRegenerate
-          })
-        });
-
+        const res = await fetch(`${API_URL}/api/v1/campaigns/jobs/${activeJobId}`);
         if (res.ok) {
-          successCount++;
-        } else {
-          const err = await res.json();
-          failuresList.push({
-            company: lead.company_name || lead.website,
-            error: err.detail || "AI template failed"
-          });
+          const job = await res.json();
+          setActiveJob(job);
+          
+          const itemsRes = await fetch(`${API_URL}/api/v1/campaigns/jobs/${activeJobId}/items`);
+          if (itemsRes.ok) {
+            const items = await itemsRes.json();
+            setActiveJobItems(items);
+            
+            const fails = items
+              .filter((it: any) => it.status === "failed")
+              .map((it: any) => ({
+                company: `Lead Profile: ${it.lead_id.substring(0, 8)}...`,
+                error: it.error_message || "AI quality check failed"
+              }));
+            setGenFailures(fails);
+            
+            const completedCount = items.filter((it: any) => it.status === "completed").length;
+            setGenSuccessCount(completedCount);
+            setGenProgress(items.filter((it: any) => ["completed", "failed", "cancelled"].includes(it.status)).length);
+          }
+
+          if (job.status === "completed" || job.status === "failed" || job.status === "cancelled") {
+            setIsGenerating(false);
+            clearInterval(timer);
+          }
         }
       } catch (e) {
-        failuresList.push({
-          company: lead.company_name || lead.website,
-          error: "API connection issue"
-        });
+        console.error(e);
       }
-      
-      await new Promise(r => setTimeout(r, 200));
+    };
+
+    poll();
+    timer = setInterval(poll, 2000);
+
+    return () => clearInterval(timer);
+  }, [activeJobId]);
+
+  const handleCancelJob = async () => {
+    if (!activeJobId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/campaigns/jobs/${activeJobId}/cancel`, { method: "POST" });
+      if (res.ok) {
+        toast("Job cancellation requested");
+      }
+    } catch (e) {
+      console.error(e);
     }
+  };
 
-    setGenSuccessCount(successCount);
-    setGenFailures(failuresList);
-    setIsGenerating(false);
+  const handleRetryJobFailures = async () => {
+    if (!activeJobId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/campaigns/jobs/${activeJobId}/retry`, { method: "POST" });
+      if (res.ok) {
+        setIsGenerating(true);
+        toast("Retrying failed job items");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
-    if (failuresList.length === 0) {
-      toast(`Successfully generated drafts for ${successCount} leads!`);
-      setShowGenModal(false);
-      setSelectedIds(new Set());
-      router.push("/drafts");
-    } else {
-      toast(`Generation complete: ${successCount} successful, ${failuresList.length} failed.`, "error");
-      fetchLeads();
+  const handleResumeJob = async () => {
+    if (!activeJobId) return;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/campaigns/jobs/${activeJobId}/resume`, { method: "POST" });
+      if (res.ok) {
+        setIsGenerating(true);
+        toast("Resuming incomplete job items");
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -1522,11 +1594,25 @@ export default function LeadsPage() {
               >
                 <X className="w-4 h-4" />
               </button>
-            </div>
+            </div>            {!activeJobId ? (
+              <div className="space-y-4 text-xs text-zinc-700 font-sans">
+                <p className="text-zinc-500">
+                  Select a generic campaign and spawn a durable backend batch generation job for the {generateForAll ? leads.length : selectedIds.size} target leads.
+                </p>
 
-            {!isGenerating && genFailures.length === 0 && genSuccessCount === 0 ? (
-              <div className="space-y-4 text-xs text-zinc-700">
-                <p className="text-zinc-500">Launch personalized email content generation via Gemini for the {generateForAll ? leads.length : selectedIds.size} target leads.</p>
+                <div className="space-y-1">
+                  <label className="text-[10px] uppercase font-bold text-zinc-400 block tracking-wider">Outreach Campaign</label>
+                  <select 
+                    value={selectedJobCampaignId} 
+                    onChange={e => setSelectedJobCampaignId(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950 cursor-pointer"
+                  >
+                    <option value="">-- Choose Campaign --</option>
+                    {campaigns.map(c => (
+                      <option key={c.id} value={c.id}>{c.name} ({c.campaign_type})</option>
+                    ))}
+                  </select>
+                </div>
 
                 <div className="flex items-center gap-2 pt-2">
                   <input 
@@ -1541,11 +1627,26 @@ export default function LeadsPage() {
                   </label>
                 </div>
 
+                <div className="flex items-center gap-2">
+                  <input 
+                    type="checkbox" 
+                    id="genSample" 
+                    checked={isSampleRun}
+                    onChange={e => setIsSampleRun(e.target.checked)}
+                    className="rounded bg-white border border-zinc-200 text-zinc-900 focus:ring-0 w-3.5 h-3.5 cursor-pointer"
+                  />
+                  <label htmlFor="genSample" className="text-zinc-600 select-none cursor-pointer">
+                    Generate 3–5 sample drafts first (Sample Run)
+                  </label>
+                </div>
+
                 <div className="pt-4 flex justify-end gap-3 border-t border-zinc-100">
                   <button 
                     onClick={() => {
                       setShowGenModal(false);
                       setGenerateForAll(false);
+                      setSelectedJobCampaignId("");
+                      setIsSampleRun(false);
                     }}
                     className="px-4 py-2 border border-zinc-200 text-zinc-500 hover:bg-zinc-50 rounded-lg text-xs font-semibold"
                   >
@@ -1555,49 +1656,134 @@ export default function LeadsPage() {
                     onClick={executeBulkGeneration}
                     className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-bold shadow-sm"
                   >
-                    Launch Generator
+                    Launch Queue Job
                   </button>
                 </div>
               </div>
-            ) : isGenerating ? (
-              <div className="text-center py-6 space-y-4">
-                <RefreshCw className="w-8 h-8 mx-auto animate-spin text-zinc-600" />
-                <div className="space-y-1">
-                  <div className="text-xs font-bold text-zinc-900">Generating personalized drafts...</div>
-                  <div className="text-[10px] text-zinc-500">Processing lead {genProgress} of {generateForAll ? leads.length : selectedIds.size}</div>
-                </div>
-                
-                <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden max-w-xs mx-auto">
-                  <div className="h-full bg-zinc-900 transition-all duration-300" style={{ width: `${(genProgress / (generateForAll ? leads.length : selectedIds.size)) * 100}%` }}></div>
-                </div>
-              </div>
             ) : (
-              <div className="space-y-4 text-xs text-zinc-700">
-                <div className="flex gap-2 items-center text-amber-600">
-                  <AlertCircle className="w-4 h-4" />
-                  <span className="font-bold">Generation completed with reports</span>
-                </div>
-                
-                <div className="p-3 rounded-lg bg-zinc-50 border border-zinc-200 text-[11px] space-y-1">
-                  <div>Successfully created drafts: <span className="text-emerald-700 font-bold">{genSuccessCount}</span></div>
-                  <div>Skipped / Failed: <span className="text-rose-700 font-bold">{genFailures.length}</span></div>
+              <div className="space-y-4 text-xs text-zinc-700 font-sans">
+                {/* Active Job Header */}
+                <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
+                  <div className="flex flex-col">
+                    <span className="text-[9px] uppercase font-bold text-zinc-400">Job ID: {activeJob?.id?.substring(0, 8)}...</span>
+                    <span className="text-zinc-500 font-semibold">Status: <span className="capitalize font-bold text-zinc-800">{activeJob?.status}</span></span>
+                  </div>
+                  
+                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                    activeJob?.status === "completed" ? "bg-emerald-100 text-emerald-700" :
+                    activeJob?.status === "failed" ? "bg-rose-100 text-rose-700" :
+                    activeJob?.status === "cancelled" ? "bg-zinc-100 text-zinc-600" :
+                    "bg-blue-100 text-blue-700 animate-pulse"
+                  }`}>
+                    {activeJob?.status}
+                  </span>
                 </div>
 
+                {/* Counter indicators */}
+                <div className="grid grid-cols-5 gap-2 text-center text-[10px] font-bold text-zinc-600">
+                  <div className="bg-zinc-50 border border-zinc-200 rounded p-1.5">
+                    <div className="text-zinc-400">Total</div>
+                    <div className="text-zinc-950 font-black">{activeJob?.total}</div>
+                  </div>
+                  <div className="bg-zinc-50 border border-zinc-200 rounded p-1.5">
+                    <div className="text-zinc-400">Queued</div>
+                    <div className="text-zinc-950 font-black">{activeJob?.queued}</div>
+                  </div>
+                  <div className="bg-zinc-50 border border-zinc-200 rounded p-1.5">
+                    <div className="text-zinc-400">Active</div>
+                    <div className="text-zinc-950 font-black">{activeJob?.processing}</div>
+                  </div>
+                  <div className="bg-zinc-50 border border-zinc-200 rounded p-1.5">
+                    <div className="text-zinc-400">Done</div>
+                    <div className="text-emerald-600 font-black">{activeJob?.completed}</div>
+                  </div>
+                  <div className="bg-zinc-50 border border-zinc-200 rounded p-1.5">
+                    <div className="text-zinc-400">Fail</div>
+                    <div className="text-rose-600 font-black">{activeJob?.failed}</div>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
+                <div className="space-y-1.5">
+                  <div className="flex justify-between text-[9px] font-bold text-zinc-400">
+                    <span>PROGRESS</span>
+                    <span>{Math.round((genProgress / (activeJob?.total || 1)) * 100)}%</span>
+                  </div>
+                  <div className="w-full bg-zinc-100 h-2 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-zinc-900 transition-all duration-300" 
+                      style={{ width: `${(genProgress / (activeJob?.total || 1)) * 100}%` }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Error Log Display */}
                 {genFailures.length > 0 && (
                   <div className="space-y-2">
                     <span className="text-[10px] uppercase font-bold text-zinc-400 block">Failure Log Detail</span>
-                    <div className="max-h-32 overflow-y-auto border border-zinc-200 rounded-lg divide-y divide-zinc-100">
+                    <div className="max-h-32 overflow-y-auto border border-zinc-200 rounded-lg divide-y divide-zinc-100 bg-white">
                       {genFailures.map((f, index) => (
                         <div key={index} className="p-2 flex justify-between gap-4 text-[10px]">
                           <span className="font-bold text-zinc-900 truncate max-w-[120px]">{f.company}</span>
-                          <span className="text-rose-600 text-right truncate max-w-[200px]">{f.error}</span>
+                          <span className="text-rose-600 text-right truncate max-w-[200px]" title={f.error}>{f.error}</span>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
+
+                {/* Controls */}
+                <div className="flex items-center justify-between border-t border-zinc-100 pt-3">
+                  <div className="flex gap-2">
+                    {["pending", "running"].includes(activeJob?.status) && (
+                      <button 
+                        onClick={handleCancelJob}
+                        className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 rounded-lg text-xs font-semibold transition-all"
+                      >
+                        Cancel Job
+                      </button>
+                    )}
+
+                    {["completed", "failed", "cancelled"].includes(activeJob?.status) && activeJob?.failed > 0 && (
+                      <button 
+                        onClick={handleRetryJobFailures}
+                        className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-bold shadow-sm transition-all"
+                      >
+                        Retry Failures
+                      </button>
+                    )}
+
+                    {["completed", "failed"].includes(activeJob?.status) && (
+                      <button 
+                        onClick={handleResumeJob}
+                        className="px-3 py-1.5 border border-zinc-200 hover:bg-zinc-50 text-zinc-600 rounded-lg text-xs font-semibold transition-all"
+                      >
+                        Resume Queue
+                      </button>
+                    )}
+                  </div>
+
+                  <button 
+                    onClick={() => {
+                      if (!isGenerating) {
+                        setShowGenModal(false);
+                        setGenerateForAll(false);
+                        setActiveJobId(null);
+                        setActiveJob(null);
+                        setActiveJobItems([]);
+                        setSelectedJobCampaignId("");
+                        setIsSampleRun(false);
+                        fetchLeads();
+                      }
+                    }}
+                    disabled={isGenerating}
+                    className="px-4 py-1.5 bg-zinc-100 text-zinc-500 rounded-lg text-xs font-semibold disabled:opacity-50"
+                  >
+                    Close Drawer
+                  </button>
+                </div>
               </div>
-            )}
+            )})}
           </div>
         </div>
       )}
