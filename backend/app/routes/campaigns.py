@@ -272,6 +272,7 @@ async def clone_campaign(
     cloned_campaign["id"] = cloned_id
     cloned_campaign["name"] = f"Copy of {orig['name']}"
     cloned_campaign["cloned_from_id"] = id
+    cloned_campaign["parent_campaign_id"] = id
     cloned_campaign["status"] = "paused"
     cloned_campaign["sender_profile_snapshot"] = json.dumps(sender_snapshot)
     cloned_campaign["prompt_config_snapshot"] = json.dumps(prompt_snapshot)

@@ -249,6 +249,71 @@ class SequenceService:
         # Determine subject template text & body template text
         # If specific step template is missing, fall back to global campaign prompt_template_id or templates
         prompt_ver_id = current_step.get("body_template_version_id") or campaign.get("prompt_template_id")
+        
+        assigned_variant_id = None
+        assigned_variant_name = None
+        
+        try:
+            exp_res = supabase.table("experiments")\
+                .select("*")\
+                .eq("campaign_id", campaign_id)\
+                .eq("status", "active")\
+                .execute()
+                
+            if exp_res.data:
+                experiment = exp_res.data[0]
+                exp_id = experiment["id"]
+                
+                var_res = supabase.table("experiment_variants")\
+                    .select("*")\
+                    .eq("experiment_id", exp_id)\
+                    .execute()
+                variants = var_res.data or []
+                
+                if variants:
+                    # Check existing assignment
+                    assign_res = supabase.table("experiment_assignments")\
+                        .select("*")\
+                        .eq("experiment_id", exp_id)\
+                        .eq("lead_id", lead_id)\
+                        .execute()
+                        
+                    if assign_res.data:
+                        assigned_variant_id = assign_res.data[0]["variant_id"]
+                        assigned_variant_name = assign_res.data[0]["variant_name"]
+                    else:
+                        import hashlib
+                        hash_input = f"{lead_id}_{exp_id}"
+                        hash_val = int(hashlib.sha256(hash_input.encode()).hexdigest(), 16)
+                        percent = hash_val % 100
+                        
+                        cumulative = 0
+                        assigned_var = variants[-1]
+                        for v in variants:
+                            weight_pct = int((v.get("weight") or 0.5) * 100)
+                            cumulative += weight_pct
+                            if percent < cumulative:
+                                assigned_var = v
+                                break
+                                
+                        assigned_variant_id = assigned_var["id"]
+                        assigned_variant_name = assigned_var["name"]
+                        
+                        import uuid
+                        supabase.table("experiment_assignments").insert({
+                            "id": str(uuid.uuid4()),
+                            "experiment_id": exp_id,
+                            "lead_id": lead_id,
+                            "variant_id": assigned_variant_id,
+                            "variant_name": assigned_variant_name
+                        }).execute()
+                        
+                    # Override prompt_ver_id if variant specifies one
+                    variant_details = [v for v in variants if v["id"] == assigned_variant_id]
+                    if variant_details and variant_details[0].get("prompt_template_version_id"):
+                        prompt_ver_id = variant_details[0]["prompt_template_version_id"]
+        except Exception as e:
+            logger.error(f"Error resolving A/B experiment assignment: {e}")
         template_text = ""
         if prompt_ver_id:
             pv_res = supabase.table("prompt_versions").select("*").eq("id", prompt_ver_id).execute()
@@ -386,7 +451,9 @@ class SequenceService:
             "personalization_score": eval_res["scores"]["personalization_score"],
             "clarity_score": eval_res["scores"]["clarity_score"],
             "warnings": json.dumps(eval_res["warnings"]),
-            "campaign_id": campaign_id
+            "campaign_id": campaign_id,
+            "variant_id": assigned_variant_id,
+            "variant_name": assigned_variant_name
         }
         supabase.table("email_drafts").insert(draft_payload).execute()
 

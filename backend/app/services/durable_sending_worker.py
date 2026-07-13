@@ -376,6 +376,9 @@ class DurableSendingWorker:
             "recipient_email": recipient,
             "gmail_message_id": gmail_message_id,
             "gmail_thread_id": gmail_thread_id,
+            "variant_id": draft.get("variant_id"),
+            "variant_name": draft.get("variant_name"),
+            "prompt_version_id": draft.get("prompt_version"),
             "occurred_at": now_str
         }).execute()
 
@@ -432,6 +435,16 @@ class DurableSendingWorker:
             }).eq("campaign_id", job["campaign_id"]).eq("lead_id", job["lead_id"]).execute()
 
             # Insert failure event log
+            draft_id = job.get("draft_id")
+            draft = {}
+            if draft_id:
+                try:
+                    draft_res = supabase.table("email_drafts").select("variant_id, variant_name, prompt_version").eq("id", draft_id).execute()
+                    if draft_res.data:
+                        draft = draft_res.data[0]
+                except Exception:
+                    pass
+
             event_id = str(mocker_uuid() if "mocker_uuid" in globals() else uuid_gen())
             supabase.table("send_events").insert({
                 "id": event_id,
@@ -442,6 +455,9 @@ class DurableSendingWorker:
                 "event_type": "failed",
                 "recipient_email": "",
                 "error_message": error,
+                "variant_id": draft.get("variant_id"),
+                "variant_name": draft.get("variant_name"),
+                "prompt_version_id": draft.get("prompt_version"),
                 "occurred_at": now_str
             }).execute()
 

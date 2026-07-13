@@ -642,6 +642,18 @@ class SQLiteSupabaseClient:
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
 
+        # experiment_assignments
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS experiment_assignments (
+            id TEXT PRIMARY KEY,
+            experiment_id TEXT NOT NULL,
+            lead_id TEXT NOT NULL,
+            variant_id TEXT NOT NULL,
+            variant_name TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(experiment_id, lead_id)
+        )""")
+
         # integration_connections
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS integration_connections (
@@ -795,6 +807,19 @@ class SQLiteSupabaseClient:
 
         # Alter Campaigns Table
         self._add_column_if_missing(cursor, "campaigns", "ooo_behavior", "TEXT", "'ignore'")
+        self._add_column_if_missing(cursor, "campaigns", "parent_campaign_id", "TEXT")
+
+        # Alter Experiment Variants Table
+        self._add_column_if_missing(cursor, "experiment_variants", "prompt_template_version_id", "TEXT")
+
+        # Alter Email Drafts Table
+        self._add_column_if_missing(cursor, "email_drafts", "variant_id", "TEXT")
+        self._add_column_if_missing(cursor, "email_drafts", "variant_name", "TEXT")
+
+        # Alter Send Events Table
+        self._add_column_if_missing(cursor, "send_events", "variant_id", "TEXT")
+        self._add_column_if_missing(cursor, "send_events", "variant_name", "TEXT")
+        self._add_column_if_missing(cursor, "send_events", "prompt_version_id", "TEXT")
 
         # --- V2 DATA MIGRATIONS ---
         # 1. Migrate leads website_pain_points & erp_approach to custom_fields

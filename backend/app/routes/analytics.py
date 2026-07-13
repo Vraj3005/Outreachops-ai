@@ -316,3 +316,102 @@ async def trigger_manual_reply_sync(owner: dict = Depends(require_owner)):
         return {"status": "success", "message": "Gmail reply sync completed successfully."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/funnel")
+async def get_conversion_funnel(
+    campaign_id: str = None,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Returns conversion funnel stats.
+    """
+    from app.services.analytics_service import AnalyticsService
+    return AnalyticsService.get_funnel_metrics(user_id=owner["id"], campaign_id=campaign_id)
+
+
+@router.get("/experiments")
+async def list_experiments(owner: dict = Depends(require_owner)):
+    """
+    Lists all experiments.
+    """
+    try:
+        res = supabase.table("experiments").select("*").eq("user_id", owner["id"]).execute()
+        return res.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/experiments")
+async def create_experiment(
+    payload: dict,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Creates a new A/B Experiment and its variants.
+    """
+    import uuid
+    name = payload.get("name")
+    campaign_id = payload.get("campaign_id")
+    primary_metric = payload.get("primary_metric", "reply_rate")
+    variants = payload.get("variants", []) # list of {"name": "A", "prompt_template_version_id": "v1", "weight": 0.5}
+
+    if not name or not campaign_id or not variants:
+        raise HTTPException(status_code=400, detail="Missing required parameters")
+
+    try:
+        exp_id = str(uuid.uuid4())
+        
+        # Insert experiment
+        supabase.table("experiments").insert({
+            "id": exp_id,
+            "user_id": owner["id"],
+            "name": name,
+            "description": payload.get("description", ""),
+            "status": "active"
+        }).execute()
+
+        # Insert variants
+        for idx, var in enumerate(variants):
+            supabase.table("experiment_variants").insert({
+                "id": str(uuid.uuid4()),
+                "experiment_id": exp_id,
+                "campaign_id": campaign_id,
+                "name": var["name"],
+                "description": f"Variant {var['name']}",
+                "weight": var.get("weight", 0.5),
+                "prompt_template_version_id": var.get("prompt_template_version_id")
+            }).execute()
+
+        return {"status": "success", "experiment_id": exp_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/experiments/{id}")
+async def get_experiment_details(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Returns detailed statistical analysis report for an experiment.
+    """
+    from app.services.analytics_service import AnalyticsService
+    return AnalyticsService.get_experiment_report(user_id=owner["id"], experiment_id=id)
+
+
+@router.post("/experiments/{id}/stop")
+async def stop_experiment(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Completes and stops an active experiment.
+    """
+    try:
+        supabase.table("experiments").update({
+            "status": "completed"
+        }).eq("id", id).execute()
+        return {"status": "success", "message": "Experiment stopped successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
