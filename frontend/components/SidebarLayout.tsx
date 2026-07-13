@@ -4,7 +4,7 @@ import React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { 
   Sparkles, RefreshCw, BarChart3, 
-  Settings, Database, Mail, LogOut, Code, Send
+  Settings, Database, Mail, LogOut, Code, Send, Clock
 } from "lucide-react";
 import { useToast } from "./Toast";
 import { supabase } from "@/lib/supabase";
@@ -117,6 +117,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     { name: "Leads Database", path: "/leads", icon: Database },
     { name: "Email Drafts", path: "/drafts", icon: Mail },
     { name: "Campaigns", path: "/campaigns", icon: Send },
+    { name: "Outbox Queue", path: "/queue", icon: Clock },
     { name: "Prompt Studio", path: "/prompt-studio", icon: Code },
     { name: "Analytics", path: "/analytics", icon: BarChart3 },
     { name: "Integrations", path: "/integrations", icon: RefreshCw },

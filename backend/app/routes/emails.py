@@ -17,138 +17,149 @@ gmail_service = GmailService()
 rate_limit_service = RateLimitService()
 
 
-def process_approved_queue(user_id: str):
-    """
-    Loops through the database approved queue, validates daily caps,
-    respects campaign limits, delays, and filters, and dispatches via Gmail.
-    Checks campaign status in real-time to allow pausing.
-    """
-    # Safety rule: if demo mode has sending disabled, abort background sends
-    if settings.DEMO_MODE and not settings.DEMO_SENDING_ENABLED:
-        logger.warning("Sending is disabled in demo mode. Approved queue aborted.")
-        return
-
-    if not supabase:
-        logger.error("Supabase client is offline. Approved queue aborted.")
-        return
-
-    # 1. Fetch active campaign parameters
-    campaign = None
-    daily_limit = 50
-    delay_seconds = 5
-    camp_type = "mixed"
-
-    try:
-        camp_res = (
-            supabase.table("campaigns")
-            .select("*")
-            .eq("user_id", user_id)
-            .eq("status", "active")
-            .limit(1)
-            .execute()
-        )
-        if camp_res.data:
-            campaign = camp_res.data[0]
-            daily_limit = campaign.get("daily_send_limit", 50)
-            delay_seconds = campaign.get("delay_seconds", 5)
-            camp_type = campaign.get("campaign_type", "mixed")
-            logger.info(
-                f"Using campaign settings: '{campaign['name']}' (Limit: {daily_limit}, Delay: {delay_seconds}s, Type: {camp_type})"
-            )
-        else:
-            logger.info("No active campaign found. Running with default limits.")
-    except Exception as e:
-        logger.error(f"Failed to fetch active campaign details: {e}")
-
-    # 2. Fetch approved drafts
-    try:
-        query = (
-            supabase.table("email_drafts")
-            .select("id, lead_id, email_type")
-            .eq("user_id", user_id)
-            .eq("status", "approved")
-        )
-
-        # Apply campaign type boundaries if not mixed or generic
-        if camp_type not in ["mixed", "generic"]:
-            query = query.eq("email_type", camp_type)
-
-        res = query.execute()
-        drafts = res.data or []
-    except Exception as e:
-        logger.error(f"Failed to fetch approved drafts from Supabase: {e}")
-        return
-
-    if not drafts:
-        logger.info(
-            "No approved email drafts found matching campaign constraints in queue."
-        )
-        return
-
-    logger.info(f"Starting batch dispatch of {len(drafts)} approved email drafts...")
-
-    for idx, draft in enumerate(drafts):
-        draft_id = draft["id"]
-        lead_id = draft["lead_id"]
-
-        # 3. Check Campaign Run Status (in real-time to support Pause triggers)
-        if campaign:
-            try:
-                camp_check = (
-                    supabase.table("campaigns")
-                    .select("status")
-                    .eq("id", campaign["id"])
-                    .execute()
-                )
-                if not camp_check.data or camp_check.data[0]["status"] != "active":
-                    logger.info(
-                        f"Campaign '{campaign['name']}' is no longer active. Halting background dispatches."
-                    )
-                    break
-            except Exception as e:
-                logger.error(f"Failed to verify campaign run status: {e}")
-
-        # 4. Check Daily Send Limit
-        if not rate_limit_service.check_daily_limit(user_id=user_id, cap=daily_limit):
-            logger.warning(
-                "Daily send limit cap hit. Stopping background queue dispatcher."
-            )
-            break
-
-        # 5. Check Double Send Limit (no multiple emails to same lead in a single day)
-        if not rate_limit_service.check_double_email_limit(lead_id=lead_id):
-            logger.info(
-                f"Skipping draft {draft_id}: Lead {lead_id} was already emailed today."
-            )
-            continue
-
-        # 6. Send approved email via Gmail
-        try:
-            logger.info(f"Processing send for draft {draft_id}...")
-            send_res = gmail_service.send_approved_email(
-                draft_id=draft_id, user_id=user_id
-            )
-            logger.info(f"Send outcome for draft {draft_id}: {send_res}")
-        except Exception as e:
-            logger.error(
-                f"Failed to dispatch draft {draft_id} inside background thread: {e}"
-            )
-
-        # 7. Delay between emails
-        if idx < len(drafts) - 1:
-            logger.info(f"Sleeping for {delay_seconds} seconds between messages...")
-            time.sleep(delay_seconds)
-
-    logger.info("Finished processing approved queue batch.")
-
+import datetime
+import uuid
+from fastapi import HTTPException
 
 @router.post("/send-approved", status_code=status.HTTP_202_ACCEPTED)
 async def trigger_send_approved_emails(
-    background_tasks: BackgroundTasks, owner: dict = Depends(require_owner)
+    owner: dict = Depends(require_owner)
 ):
     """
-    Triggers the sending of all approved drafts in the database.
-    Runs asynchronously in the background.
+    Finds all approved drafts and schedules them immediately in the durable scheduled queue.
     """
-    background_tasks.add_task(process_approved_queue, user_id=owner["id"])
-    return {"message": "Background mail dispatcher started."}
+    user_id = owner["id"]
+    try:
+        drafts_res = supabase.table("email_drafts")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .eq("status", "approved")\
+            .execute()
+        drafts = drafts_res.data or []
+        
+        scheduled_count = 0
+        for draft in drafts:
+            exist_check = supabase.table("scheduled_emails")\
+                .select("id")\
+                .eq("draft_id", draft["id"])\
+                .execute()
+            if exist_check.data:
+                continue
+
+            sched_id = str(uuid.uuid4())
+            now_str = datetime.datetime.now(datetime.UTC).isoformat()
+            idempotency_key = f"send_draft_{draft['id']}"
+
+            campaign_id = draft.get("campaign_id") or "default-campaign"
+            lead_id = draft.get("lead_id")
+            
+            cl_res = supabase.table("campaign_leads")\
+                .select("current_sequence_step")\
+                .eq("campaign_id", campaign_id)\
+                .eq("lead_id", lead_id)\
+                .execute()
+            step_num = cl_res.data[0]["current_sequence_step"] if cl_res.data else 1
+
+            supabase.table("scheduled_emails").insert({
+                "id": sched_id,
+                "user_id": user_id,
+                "draft_id": draft["id"],
+                "campaign_id": campaign_id,
+                "lead_id": lead_id,
+                "sequence_step_id": str(step_num),
+                "scheduled_at": now_str,
+                "scheduled_for": now_str,
+                "status": "pending",
+                "idempotency_key": idempotency_key,
+                "attempts": 0
+            }).execute()
+            scheduled_count += 1
+            
+        return {"status": "success", "message": f"Successfully queued {scheduled_count} approved emails."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/queue")
+async def get_scheduled_emails_queue(
+    owner: dict = Depends(require_owner)
+):
+    """
+    Returns list of all scheduled, processing, sent, and failed items in the queue.
+    """
+    try:
+        res = supabase.table("scheduled_emails")\
+            .select("*")\
+            .eq("user_id", owner["id"])\
+            .order("created_at", desc=True)\
+            .execute()
+        return res.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/queue/{id}/retry")
+async def retry_scheduled_email(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Resets failed outbox items back to pending status.
+    """
+    try:
+        # Check job
+        job_res = supabase.table("scheduled_emails").select("*").eq("id", id).execute()
+        if not job_res.data:
+            raise HTTPException(status_code=404, detail="Scheduled email job not found")
+        job = job_res.data[0]
+
+        now_str = datetime.datetime.now(datetime.UTC).isoformat()
+        
+        # Reset scheduled email
+        supabase.table("scheduled_emails").update({
+            "status": "pending",
+            "attempts": 0,
+            "last_error": None,
+            "scheduled_for": now_str,
+            "updated_at": now_str
+        }).eq("id", id).execute()
+
+        # Re-enable campaign lead
+        supabase.table("campaign_leads").update({
+            "status": "scheduled",
+            "next_step_scheduled_at": now_str,
+            "last_error": None
+        }).eq("campaign_id", job["campaign_id"]).eq("lead_id", job["lead_id"]).execute()
+
+        return {"status": "success", "message": "Email job reset to pending."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/queue/{id}/cancel")
+async def cancel_scheduled_email(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Cancels a scheduled or pending email.
+    """
+    try:
+        supabase.table("scheduled_emails").update({
+            "status": "cancelled",
+            "updated_at": datetime.datetime.now(datetime.UTC).isoformat()
+        }).eq("id", id).execute()
+        return {"status": "success", "message": "Scheduled email cancelled."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/worker-health")
+async def get_sending_worker_health(
+    owner: dict = Depends(require_owner)
+):
+    """
+    Returns worker heartbeat health diagnostics status metrics.
+    """
+    from app.services.durable_sending_worker import DurableSendingWorker
+    return DurableSendingWorker.get_health_status()

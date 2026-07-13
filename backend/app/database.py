@@ -559,6 +559,13 @@ class SQLiteSupabaseClient:
             lead_id TEXT NOT NULL,
             scheduled_at TEXT NOT NULL,
             status TEXT DEFAULT 'pending',
+            sequence_step_id TEXT,
+            attempts INTEGER DEFAULT 0,
+            idempotency_key TEXT UNIQUE,
+            gmail_message_id TEXT,
+            gmail_thread_id TEXT,
+            last_error TEXT,
+            scheduled_for TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
@@ -761,6 +768,15 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "campaign_leads", "last_sent_at", "TEXT")
         self._add_column_if_missing(cursor, "campaign_leads", "last_error", "TEXT")
         self._add_column_if_missing(cursor, "campaign_leads", "exclude_weekends", "INTEGER", "1")
+
+        # Alter Scheduled Emails Table
+        self._add_column_if_missing(cursor, "scheduled_emails", "sequence_step_id", "TEXT")
+        self._add_column_if_missing(cursor, "scheduled_emails", "attempts", "INTEGER", "0")
+        self._add_column_if_missing(cursor, "scheduled_emails", "idempotency_key", "TEXT")
+        self._add_column_if_missing(cursor, "scheduled_emails", "gmail_message_id", "TEXT")
+        self._add_column_if_missing(cursor, "scheduled_emails", "gmail_thread_id", "TEXT")
+        self._add_column_if_missing(cursor, "scheduled_emails", "last_error", "TEXT")
+        self._add_column_if_missing(cursor, "scheduled_emails", "scheduled_for", "TEXT")
 
         # --- V2 DATA MIGRATIONS ---
         # 1. Migrate leads website_pain_points & erp_approach to custom_fields

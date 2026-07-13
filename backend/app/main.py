@@ -46,13 +46,17 @@ async def lifespan(app: FastAPI):
     
     from app.services.generation_worker import GenerationWorker
     from app.services.sequence_cron import SequenceCron
+    from app.services.durable_sending_worker import DurableSendingWorker
+    
     GenerationWorker.start()
     SequenceCron.start()
+    DurableSendingWorker.start()
     
     yield
     # Shutdown actions
     GenerationWorker.stop()
     SequenceCron.stop()
+    DurableSendingWorker.stop()
 
 
 app = FastAPI(
