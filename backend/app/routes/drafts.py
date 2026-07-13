@@ -15,6 +15,7 @@ from app.crud.drafts import (
 )
 from app.crud.leads import get_lead
 from app.crud.prompt_templates import get_active_template
+from app.database import supabase
 from app.schemas.email import EmailDraft, EmailDraftCreate, EmailDraftUpdate
 from app.services.email_quality_service import EmailQualityService
 from app.services.gemini_service import GeminiService
@@ -77,6 +78,7 @@ async def generate_drafts(
     Generate ERP email drafts for a lead using Gemini API.
     """
     from app.services.rate_limit_service import RateLimitService
+
     limiter = RateLimitService()
     limit_key = f"rate_limit:drafts_generate:{owner['id']}"
     if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
@@ -121,12 +123,13 @@ async def generate_drafts(
 
     # Signature structure from database settings
     from app.routes.settings import get_owner_settings_sync
+
     owner_settings = get_owner_settings_sync(owner["id"])
     sender_name = owner_settings.get("sender_name") or settings.YOUR_NAME
     agency = owner_settings.get("business_name") or settings.YOUR_AGENCY_NAME
     site = owner_settings.get("website") or settings.YOUR_WEBSITE
     phone = owner_settings.get("sender_phone") or settings.YOUR_PHONE
-    
+
     if owner_settings.get("default_signature"):
         signature_str = owner_settings["default_signature"]
     else:
@@ -156,20 +159,26 @@ async def generate_drafts(
 
     if campaign:
         import json
-        objective = campaign.get("objective") or "Introduce our professional outreach services"
+
+        objective = (
+            campaign.get("objective") or "Introduce our professional outreach services"
+        )
         offer = campaign.get("offer") or "operational alignment auditing"
-        val_prop = campaign.get("value_proposition") or "automate outbound and CRM management tasks"
+        val_prop = (
+            campaign.get("value_proposition")
+            or "automate outbound and CRM management tasks"
+        )
         tone = campaign.get("tone") or "professional"
         cta = campaign.get("CTA") or "Are you available for a brief call next week?"
         length = campaign.get("email_length") or "medium"
-        
+
         req_content = campaign.get("required_content") or "[]"
         if isinstance(req_content, str):
             try:
                 req_content = json.loads(req_content)
             except Exception:
                 req_content = []
-        
+
         banned_content = campaign.get("banned_content") or "[]"
         if isinstance(banned_content, str):
             try:
@@ -178,7 +187,9 @@ async def generate_drafts(
                 banned_content = []
 
         req_inst = f"- Required topics: {', '.join(req_content)}" if req_content else ""
-        banned_inst = f"- Banned terms: {', '.join(banned_content)}" if banned_content else ""
+        banned_inst = (
+            f"- Banned terms: {', '.join(banned_content)}" if banned_content else ""
+        )
 
         prompt = f"""
 Write a personalized cold email template.
@@ -561,7 +572,9 @@ async def send_draft_endpoint(
     rate_limit_service = RateLimitService()
 
     limit_key = f"rate_limit:send_draft:{owner['id']}"
-    if rate_limit_service.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
+    if rate_limit_service.is_rate_limited(
+        limit_key, max_requests=10, window_seconds=60
+    ):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many send requests. Please try again later.",

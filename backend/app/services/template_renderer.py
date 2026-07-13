@@ -1,5 +1,6 @@
 import re
-from typing import Dict, Any, Tuple, Set, List
+from typing import Any
+
 
 class SafeTemplateRenderer:
     # Pattern to match {{variable_name}} or {{variable_name|fallback}}
@@ -9,21 +10,43 @@ class SafeTemplateRenderer:
 
     ALLOWED_VARIABLES = {
         # Lead
-        "first_name", "last_name", "full_name", "company_name", "job_title", 
-        "contact_email", "website", "industry", "country", "city",
+        "first_name",
+        "last_name",
+        "full_name",
+        "company_name",
+        "job_title",
+        "contact_email",
+        "website",
+        "industry",
+        "country",
+        "city",
         # Campaign
-        "campaign.name", "campaign.objective", "campaign.offer", 
-        "campaign.value_proposition", "campaign.target_audience", "campaign.cta",
+        "campaign.name",
+        "campaign.objective",
+        "campaign.offer",
+        "campaign.value_proposition",
+        "campaign.target_audience",
+        "campaign.cta",
         # Research
-        "research.summary", "research.services", "research.observations", "research.sources",
+        "research.summary",
+        "research.services",
+        "research.observations",
+        "research.sources",
         # Sender
-        "sender.name", "sender.company", "sender.website", "sender.phone", "sender.signature",
+        "sender.name",
+        "sender.company",
+        "sender.website",
+        "sender.phone",
+        "sender.signature",
         # Sequence
-        "sequence.step_number", "sequence.previous_subject"
+        "sequence.step_number",
+        "sequence.previous_subject",
     }
 
     @classmethod
-    def render(cls, template: str, context: Dict[str, Any], max_size: int = 10000) -> Tuple[str, Set[str], Set[str]]:
+    def render(
+        cls, template: str, context: dict[str, Any], max_size: int = 10000
+    ) -> tuple[str, set[str], set[str]]:
         """
         Renders the template safely.
         Returns:
@@ -65,7 +88,9 @@ class SafeTemplateRenderer:
         return rendered, used, missing
 
     @classmethod
-    def validate_syntax(cls, template: str) -> Tuple[bool, List[str], Set[str], Set[str]]:
+    def validate_syntax(
+        cls, template: str
+    ) -> tuple[bool, list[str], set[str], set[str]]:
         """
         Validates template syntax and variables.
         Returns:
@@ -81,32 +106,41 @@ class SafeTemplateRenderer:
         # 1. Check unbalanced braces
         # A simple check: count occurrences of '{' and '}' and ensure they form proper pairs.
         # Check if there are nested braces e.g. {{{ or }}} which are malformed
-        if len(re.findall(r"\{\{\{", template)) > 0 or len(re.findall(r"\}\}\}", template)) > 0:
+        if (
+            len(re.findall(r"\{\{\{", template)) > 0
+            or len(re.findall(r"\}\}\}", template)) > 0
+        ):
             errors.append("Malformed template braces: triple braces are not supported.")
 
         open_count = len(re.findall(r"\{\{", template))
         close_count = len(re.findall(r"\}\}", template))
         if open_count != close_count:
-            errors.append(f"Unbalanced template braces: found {open_count} opening '{{{{' and {close_count} closing '}}}}'.")
+            errors.append(
+                f"Unbalanced template braces: found {open_count} opening '{{{{' and {close_count} closing '}}}}'."
+            )
 
         # 2. Check for unmatched single braces inside the text that look like typos (e.g. {first_name})
         # Wait, some legitimate markdown might use single { or }, so we only raise warning if it's `{word}`
-        single_brace_vars = re.findall(r"(?<!\{)\{([a-zA-Z0-9_\.\-]+)\}(?!\})", template)
+        single_brace_vars = re.findall(
+            r"(?<!\{)\{([a-zA-Z0-9_\.\-]+)\}(?!\})", template
+        )
         for var in single_brace_vars:
-            errors.append(f"Possible malformed placeholder '{{{var}}}' - did you mean '{{{{{var}}}}}'?")
+            errors.append(
+                f"Possible malformed placeholder '{{{var}}}' - did you mean '{{{{{var}}}}}'?"
+            )
 
         # 3. Extract and check variables
         for match in cls.PATTERN.finditer(template):
             var_path = match.group(1).strip()
             detected_variables.add(var_path)
-            
+
             # Check namespace whitelist
             is_valid_var = False
             if var_path in cls.ALLOWED_VARIABLES:
                 is_valid_var = True
             elif var_path.startswith("custom."):
                 is_valid_var = True
-            
+
             if not is_valid_var:
                 unknown_variables.add(var_path)
 
@@ -118,7 +152,7 @@ class SafeTemplateRenderer:
         if val is None:
             return ""
         val_str = str(val)
-        
+
         # 1. Cap maximum lengths per field category
         if var_path.startswith("research."):
             max_len = 5000
@@ -126,40 +160,56 @@ class SafeTemplateRenderer:
             max_len = 2000
         else:
             max_len = 500
-            
+
         if len(val_str) > max_len:
             val_str = val_str[:max_len]
-            
+
         # 2. If it's research/custom, strip existing XML tag boundaries to prevent escaping
         if var_path.startswith("research.") or var_path.startswith("custom."):
             val_str = re.sub(r"</?[a-zA-Z0-9_\.\-]+>", "", val_str)
             val_str = val_str.replace("-->", "").replace("]]>", "")
-            
+
         # 3. For short text fields, strip newlines, carriage returns, and instruction command phrases
         short_fields = {
-            "first_name", "last_name", "full_name", "company_name", "job_title", 
-            "contact_email", "website", "industry", "country", "city",
-            "sender.name", "sender.company", "sender.website", "sender.phone"
+            "first_name",
+            "last_name",
+            "full_name",
+            "company_name",
+            "job_title",
+            "contact_email",
+            "website",
+            "industry",
+            "country",
+            "city",
+            "sender.name",
+            "sender.company",
+            "sender.website",
+            "sender.phone",
         }
         if var_path in short_fields:
             val_str = val_str.replace("\n", " ").replace("\r", " ")
             injection_commands = [
-                "ignore previous", "system instruction", "system prompt",
-                "override rules", "forget instructions", "you must output",
-                "hacked", "hack"
+                "ignore previous",
+                "system instruction",
+                "system prompt",
+                "override rules",
+                "forget instructions",
+                "you must output",
+                "hacked",
+                "hack",
             ]
             for cmd in injection_commands:
                 val_str = re.sub(re.escape(cmd), "", val_str, flags=re.IGNORECASE)
-                
+
         # 4. Wrap research in XML tag boundaries
         if var_path.startswith("research."):
             tag_name = var_path.replace(".", "_")
             val_str = f"<{tag_name}>{val_str}</{tag_name}>"
-            
+
         return val_str
 
     @classmethod
-    def _resolve_path(cls, path: str, context: Dict[str, Any]) -> Any:
+    def _resolve_path(cls, path: str, context: dict[str, Any]) -> Any:
         if "." not in path:
             return context.get(path)
 

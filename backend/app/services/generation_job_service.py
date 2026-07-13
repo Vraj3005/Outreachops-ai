@@ -2,7 +2,8 @@ import datetime
 import json
 import logging
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from app.database import supabase
 
 logger = logging.getLogger("outreachops.services.generation_job")
@@ -19,28 +20,36 @@ class GenerationJobService:
         cls,
         campaign_id: str,
         user_id: str,
-        lead_ids: Optional[List[str]] = None,
+        lead_ids: list[str] | None = None,
         sample_only: bool = False,
         regenerate: bool = False,
-        prompt_version_id: Optional[str] = None,
-        model_config: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        prompt_version_id: str | None = None,
+        model_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """
         Initializes a generation job and maps target leads as queued job items.
         """
         # 1. Fetch Campaign Details
-        campaign_res = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
+        campaign_res = (
+            supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
+        )
         if not campaign_res.data:
             raise ValueError(f"Campaign {campaign_id} not found")
         campaign = campaign_res.data[0]
 
         # 2. Determine prompt version & sequence step
         p_version = prompt_version_id or campaign.get("prompt_template_id")
-        
+
         sequence_step_id = None
         seq_id = campaign.get("sequence_id")
         if seq_id:
-            steps_res = supabase.table("sequence_steps").select("*").eq("sequence_id", seq_id).order("step_number").execute()
+            steps_res = (
+                supabase.table("sequence_steps")
+                .select("*")
+                .eq("sequence_id", seq_id)
+                .order("step_number")
+                .execute()
+            )
             if steps_res.data:
                 sequence_step_id = steps_res.data[0]["id"]
 
@@ -50,7 +59,12 @@ class GenerationJobService:
             resolved_lead_ids = list(lead_ids)
         else:
             # Query leads enrolled in this campaign
-            enroll_res = supabase.table("campaign_leads").select("lead_id").eq("campaign_id", campaign_id).execute()
+            enroll_res = (
+                supabase.table("campaign_leads")
+                .select("lead_id")
+                .eq("campaign_id", campaign_id)
+                .execute()
+            )
             if enroll_res.data:
                 resolved_lead_ids = [row["lead_id"] for row in enroll_res.data]
 
@@ -59,7 +73,13 @@ class GenerationJobService:
             resolved_lead_ids = resolved_lead_ids[:5]
             if len(resolved_lead_ids) == 0:
                 # Fallback to general leads if none enrolled yet
-                leads_res = supabase.table("leads").select("id").eq("user_id", user_id).limit(5).execute()
+                leads_res = (
+                    supabase.table("leads")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .limit(5)
+                    .execute()
+                )
                 resolved_lead_ids = [row["id"] for row in (leads_res.data or [])]
 
         if not resolved_lead_ids:
@@ -81,9 +101,9 @@ class GenerationJobService:
             "prompt_version": p_version,
             "model_configuration_snapshot": json.dumps(model_config or {}),
             "created_at": datetime.datetime.utcnow().isoformat(),
-            "updated_at": datetime.datetime.utcnow().isoformat()
+            "updated_at": datetime.datetime.utcnow().isoformat(),
         }
-        
+
         supabase.table("generation_jobs").insert(job_payload).execute()
 
         # 5. Insert Individual Generation Job Items
@@ -92,115 +112,148 @@ class GenerationJobService:
             item_id = str(uuid.uuid4())
             # Idempotency key covers Job + Lead + Step scope to avoid duplicate execution
             idempotency_key = f"{job_id}:{l_id}:{sequence_step_id or 'default'}"
-            items_payload.append({
-                "id": item_id,
-                "job_id": job_id,
-                "lead_id": l_id,
-                "sequence_step_id": sequence_step_id,
-                "status": "pending",
-                "attempts": 0,
-                "error_message": None,
-                "error_type": None,
-                "resulting_draft_id": None,
-                "idempotency_key": idempotency_key,
-                "created_at": datetime.datetime.utcnow().isoformat(),
-                "updated_at": datetime.datetime.utcnow().isoformat()
-            })
-            
+            items_payload.append(
+                {
+                    "id": item_id,
+                    "job_id": job_id,
+                    "lead_id": l_id,
+                    "sequence_step_id": sequence_step_id,
+                    "status": "pending",
+                    "attempts": 0,
+                    "error_message": None,
+                    "error_type": None,
+                    "resulting_draft_id": None,
+                    "idempotency_key": idempotency_key,
+                    "created_at": datetime.datetime.utcnow().isoformat(),
+                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                }
+            )
+
         supabase.table("generation_job_items").insert(items_payload).execute()
 
-        logger.info(f"Created Generation Job {job_id} with {len(items_payload)} items (sample_only={sample_only})")
+        logger.info(
+            f"Created Generation Job {job_id} with {len(items_payload)} items (sample_only={sample_only})"
+        )
         return job_payload
 
     @classmethod
-    def cancel_generation_job(cls, job_id: str, user_id: str) -> Dict[str, Any]:
+    def cancel_generation_job(cls, job_id: str, user_id: str) -> dict[str, Any]:
         """
         Transition job status to cancelled, flipping queued items to cancelled state.
         Already completed items are preserved.
         """
         # Fetch Job
-        job_res = supabase.table("generation_jobs").select("*").eq("id", job_id).eq("user_id", user_id).execute()
+        job_res = (
+            supabase.table("generation_jobs")
+            .select("*")
+            .eq("id", job_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
         if not job_res.data:
             raise ValueError(f"Job {job_id} not found")
 
         # Update pending items to cancelled
-        supabase.table("generation_job_items").update({
-            "status": "cancelled",
-            "updated_at": datetime.datetime.utcnow().isoformat()
-        }).eq("job_id", job_id).eq("status", "pending").execute()
+        supabase.table("generation_job_items").update(
+            {
+                "status": "cancelled",
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            }
+        ).eq("job_id", job_id).eq("status", "pending").execute()
 
         # Update job header status
-        supabase.table("generation_jobs").update({
-            "status": "cancelled",
-            "updated_at": datetime.datetime.utcnow().isoformat()
-        }).eq("id", job_id).execute()
+        supabase.table("generation_jobs").update(
+            {
+                "status": "cancelled",
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            }
+        ).eq("id", job_id).execute()
 
         cls.sync_job_counts(job_id)
         logger.info(f"Cancelled Generation Job {job_id}")
         return {"job_id": job_id, "status": "cancelled"}
 
     @classmethod
-    def retry_job_failures(cls, job_id: str, user_id: str) -> Dict[str, Any]:
+    def retry_job_failures(cls, job_id: str, user_id: str) -> dict[str, Any]:
         """
         Resets failed and cancelled items back to pending, triggering worker queue.
         """
-        job_res = supabase.table("generation_jobs").select("*").eq("id", job_id).eq("user_id", user_id).execute()
+        job_res = (
+            supabase.table("generation_jobs")
+            .select("*")
+            .eq("id", job_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
         if not job_res.data:
             raise ValueError(f"Job {job_id} not found")
 
         # Find items that failed or were cancelled
         for s in ["failed", "cancelled"]:
-            supabase.table("generation_job_items").update({
-                "status": "pending",
-                "attempts": 0,
-                "error_type": None,
-                "error_message": None,
-                "updated_at": datetime.datetime.utcnow().isoformat()
-            }).eq("job_id", job_id).eq("status", s).execute()
+            supabase.table("generation_job_items").update(
+                {
+                    "status": "pending",
+                    "attempts": 0,
+                    "error_type": None,
+                    "error_message": None,
+                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                }
+            ).eq("job_id", job_id).eq("status", s).execute()
 
         # Mark job status back to running/pending
-        supabase.table("generation_jobs").update({
-            "status": "pending",
-            "updated_at": datetime.datetime.utcnow().isoformat()
-        }).eq("id", job_id).execute()
+        supabase.table("generation_jobs").update(
+            {"status": "pending", "updated_at": datetime.datetime.utcnow().isoformat()}
+        ).eq("id", job_id).execute()
 
         cls.sync_job_counts(job_id)
         logger.info(f"Triggered retry on failed items of job {job_id}")
         return {"job_id": job_id, "status": "pending"}
 
     @classmethod
-    def resume_job(cls, job_id: str, user_id: str) -> Dict[str, Any]:
+    def resume_job(cls, job_id: str, user_id: str) -> dict[str, Any]:
         """
         Resets stalled items in 'processing' state back to 'pending'.
         Useful for worker crash recovery.
         """
-        job_res = supabase.table("generation_jobs").select("*").eq("id", job_id).eq("user_id", user_id).execute()
+        job_res = (
+            supabase.table("generation_jobs")
+            .select("*")
+            .eq("id", job_id)
+            .eq("user_id", user_id)
+            .execute()
+        )
         if not job_res.data:
             raise ValueError(f"Job {job_id} not found")
 
         for s in ["processing", "pending"]:
-            supabase.table("generation_job_items").update({
-                "status": "pending",
-                "error_type": None,
-                "error_message": None,
-                "updated_at": datetime.datetime.utcnow().isoformat()
-            }).eq("job_id", job_id).eq("status", s).execute()
+            supabase.table("generation_job_items").update(
+                {
+                    "status": "pending",
+                    "error_type": None,
+                    "error_message": None,
+                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                }
+            ).eq("job_id", job_id).eq("status", s).execute()
 
-        supabase.table("generation_jobs").update({
-            "status": "pending",
-            "updated_at": datetime.datetime.utcnow().isoformat()
-        }).eq("id", job_id).execute()
+        supabase.table("generation_jobs").update(
+            {"status": "pending", "updated_at": datetime.datetime.utcnow().isoformat()}
+        ).eq("id", job_id).execute()
 
         cls.sync_job_counts(job_id)
         logger.info(f"Resumed incomplete items for job {job_id}")
         return {"job_id": job_id, "status": "pending"}
 
     @classmethod
-    def sync_job_counts(cls, job_id: str) -> Dict[str, int]:
+    def sync_job_counts(cls, job_id: str) -> dict[str, int]:
         """
         Queries status distribution of items and updates job aggregates header.
         """
-        items_res = supabase.table("generation_job_items").select("status").eq("job_id", job_id).execute()
+        items_res = (
+            supabase.table("generation_job_items")
+            .select("status")
+            .eq("job_id", job_id)
+            .execute()
+        )
         items = items_res.data or []
 
         total = len(items)
@@ -220,16 +273,18 @@ class GenerationJobService:
             else:
                 job_status = "completed"
 
-        supabase.table("generation_jobs").update({
-            "status": job_status,
-            "total": total,
-            "queued": queued,
-            "processing": processing,
-            "completed": completed,
-            "failed": failed,
-            "cancelled": cancelled,
-            "updated_at": datetime.datetime.utcnow().isoformat()
-        }).eq("id", job_id).execute()
+        supabase.table("generation_jobs").update(
+            {
+                "status": job_status,
+                "total": total,
+                "queued": queued,
+                "processing": processing,
+                "completed": completed,
+                "failed": failed,
+                "cancelled": cancelled,
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            }
+        ).eq("id", job_id).execute()
 
         return {
             "total": total,
@@ -237,5 +292,5 @@ class GenerationJobService:
             "processing": processing,
             "completed": completed,
             "failed": failed,
-            "cancelled": cancelled
+            "cancelled": cancelled,
         }

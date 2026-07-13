@@ -1,12 +1,13 @@
+import logging
 import re
 import socket
-import logging
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 # Optional dns.resolver import for MX record lookup
 try:
     import dns.resolver
+
     HAS_DNS = True
 except ImportError:
     HAS_DNS = False
@@ -17,20 +18,40 @@ logger = logging.getLogger("outreachops.services.lead_quality")
 
 # Common disposable domains list
 DISPOSABLE_DOMAINS = {
-    "mailinator.com", "10minutemail.com", "tempmail.com", "yopmail.com", 
-    "guerrillamail.com", "sharklasers.com", "dispostable.com", "getairmail.com",
-    "burnermail.io", "trashmail.com", "tempmailaddress.com"
+    "mailinator.com",
+    "10minutemail.com",
+    "tempmail.com",
+    "yopmail.com",
+    "guerrillamail.com",
+    "sharklasers.com",
+    "dispostable.com",
+    "getairmail.com",
+    "burnermail.io",
+    "trashmail.com",
+    "tempmailaddress.com",
 }
 
 # Common role account local parts
 ROLE_LOCAL_PARTS = {
-    "info", "support", "admin", "sales", "contact", "jobs", "billing", 
-    "help", "office", "marketing", "hello", "team", "feedback"
+    "info",
+    "support",
+    "admin",
+    "sales",
+    "contact",
+    "jobs",
+    "billing",
+    "help",
+    "office",
+    "marketing",
+    "hello",
+    "team",
+    "feedback",
 }
+
 
 class LeadQualityService:
     @staticmethod
-    def normalize_lead_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    def normalize_lead_data(data: dict[str, Any]) -> dict[str, Any]:
         """Normalizes email casing, websites, phone formats, names, and tags."""
         normalized = data.copy()
 
@@ -47,7 +68,9 @@ class LeadQualityService:
         # 1. Email Normalization
         if "contact_email" in normalized and normalized["contact_email"]:
             email = str(normalized["contact_email"]).strip().lower()
-            normalized["contact_email"] = email if email not in ["", "null", "none"] else None
+            normalized["contact_email"] = (
+                email if email not in ["", "null", "none"] else None
+            )
         else:
             normalized["contact_email"] = None
 
@@ -60,7 +83,7 @@ class LeadQualityService:
                 # Add schema if missing
                 if not re.match(r"^https?://", web, re.IGNORECASE):
                     web = "https://" + web
-                
+
                 # Standardize parsing
                 try:
                     parsed = urlparse(web)
@@ -105,7 +128,13 @@ class LeadQualityService:
                 normalized[field] = None
 
         # 5. Name formatting
-        for field in ["first_name", "last_name", "full_name", "company_name", "job_title"]:
+        for field in [
+            "first_name",
+            "last_name",
+            "full_name",
+            "company_name",
+            "job_title",
+        ]:
             if field in normalized and normalized[field]:
                 val = str(normalized[field]).strip()
                 if val.lower() in ["", "null", "none"]:
@@ -114,9 +143,13 @@ class LeadQualityService:
                     # Clean double spacing
                     cleaned = " ".join(val.split())
                     normalized[field] = cleaned
-                    
+
                     # Backfill full_name/company_name logic
-                    if field == "full_name" and cleaned and not normalized.get("first_name"):
+                    if (
+                        field == "full_name"
+                        and cleaned
+                        and not normalized.get("first_name")
+                    ):
                         parts = cleaned.split(" ", 1)
                         normalized["first_name"] = parts[0]
                         if len(parts) > 1:
@@ -124,15 +157,21 @@ class LeadQualityService:
 
         # Sync full_name if first & last exists
         if not normalized.get("full_name") and normalized.get("first_name"):
-            normalized["full_name"] = f"{normalized['first_name']} {normalized.get('last_name') or ''}".strip()
+            normalized["full_name"] = (
+                f"{normalized['first_name']} {normalized.get('last_name') or ''}".strip()
+            )
 
         # 6. Tags normalizations
         if "tags" in normalized:
             raw_tags = normalized["tags"]
             if isinstance(raw_tags, str):
-                parsed_tags = [t.strip().lower() for t in raw_tags.split(",") if t.strip()]
+                parsed_tags = [
+                    t.strip().lower() for t in raw_tags.split(",") if t.strip()
+                ]
             elif isinstance(raw_tags, list):
-                parsed_tags = [str(t).strip().lower() for t in raw_tags if str(t).strip()]
+                parsed_tags = [
+                    str(t).strip().lower() for t in raw_tags if str(t).strip()
+                ]
             else:
                 parsed_tags = []
             normalized["tags"] = sorted(list(set(parsed_tags)))
@@ -148,11 +187,18 @@ class LeadQualityService:
                 # Sanitize custom fields keys (alphanumeric + underscore)
                 cleaned_cf = {}
                 for k, v in cf.items():
-                    k_clean = re.sub(r"[^a-zA-Z0-9_]", "", k.replace(" ", "_").replace("-", "_")).lower()
+                    k_clean = re.sub(
+                        r"[^a-zA-Z0-9_]", "", k.replace(" ", "_").replace("-", "_")
+                    ).lower()
                     if k_clean:
                         if isinstance(v, str):
                             v_clean = re.sub(r"<[^>]*>", "", v).strip()
-                            cleaned_cf[k_clean] = v_clean if v_clean.lower() not in ["", "null", "none", "undefined"] else None
+                            cleaned_cf[k_clean] = (
+                                v_clean
+                                if v_clean.lower()
+                                not in ["", "null", "none", "undefined"]
+                                else None
+                            )
                         else:
                             cleaned_cf[k_clean] = v
                 normalized["custom_fields"] = cleaned_cf
@@ -162,17 +208,14 @@ class LeadQualityService:
         return normalized
 
     @staticmethod
-    def verify_email(email: str) -> Dict[str, Any]:
+    def verify_email(email: str) -> dict[str, Any]:
         """Runs email syntax verification, role local-part, disposable lists, and DNS MX checks."""
         email = email.strip().lower()
-        
+
         # 1. Regex check
         pattern = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
         if not re.match(pattern, email):
-            return {
-                "status": "invalid",
-                "reasons": ["Invalid email syntax format."]
-            }
+            return {"status": "invalid", "reasons": ["Invalid email syntax format."]}
 
         local_part, domain = email.split("@", 1)
         reasons = []
@@ -212,7 +255,9 @@ class LeadQualityService:
         if not mx_verified:
             return {
                 "status": "invalid",
-                "reasons": ["Domain has no active MX mail server or A host DNS records."]
+                "reasons": [
+                    "Domain has no active MX mail server or A host DNS records."
+                ],
             }
 
         # Select primary classification status
@@ -225,11 +270,17 @@ class LeadQualityService:
 
         return {
             "status": status,
-            "reasons": reasons if reasons else ["Email syntax and domain routing records are active."]
+            "reasons": (
+                reasons
+                if reasons
+                else ["Email syntax and domain routing records are active."]
+            ),
         }
 
     @staticmethod
-    def calculate_fit_score(lead: Dict[str, Any], criteria: Dict[str, Any]) -> Tuple[int, List[str]]:
+    def calculate_fit_score(
+        lead: dict[str, Any], criteria: dict[str, Any]
+    ) -> tuple[int, list[str]]:
         """
         Calculates explainable campaign parameter profile score alignment (0-100).
         """
@@ -248,10 +299,14 @@ class LeadQualityService:
                 score += 20
                 reasons.append("Industry matches target campaign criteria (+20 pts).")
             else:
-                reasons.append(f"Industry '{lead.get('industry')}' does not match campaign vertical targets.")
+                reasons.append(
+                    f"Industry '{lead.get('industry')}' does not match campaign vertical targets."
+                )
         elif not target_industries:
             score += 20
-            reasons.append("No campaign industry parameters specified, vertical matches by default (+20 pts).")
+            reasons.append(
+                "No campaign industry parameters specified, vertical matches by default (+20 pts)."
+            )
         else:
             reasons.append("Missing lead industry information (0/20 pts).")
 
@@ -263,14 +318,20 @@ class LeadQualityService:
             for loc in target_locations:
                 if loc == lead_country or loc == lead_city:
                     score += 20
-                    reasons.append(f"Location match found for '{loc.capitalize()}' (+20 pts).")
+                    reasons.append(
+                        f"Location match found for '{loc.capitalize()}' (+20 pts)."
+                    )
                     matched_loc = True
                     break
             if not matched_loc:
-                reasons.append("Lead location does not match campaign regional limits (0/20 pts).")
+                reasons.append(
+                    "Lead location does not match campaign regional limits (0/20 pts)."
+                )
         else:
             score += 20
-            reasons.append("Global campaign scope: location parameters match by default (+20 pts).")
+            reasons.append(
+                "Global campaign scope: location parameters match by default (+20 pts)."
+            )
 
         # 3. Job Title Role Alignment (up to 20 pts)
         lead_title = str(lead.get("job_title") or "").strip().lower()
@@ -279,11 +340,15 @@ class LeadQualityService:
             for role in target_roles:
                 if role in lead_title:
                     score += 20
-                    reasons.append(f"Job title '{lead.get('job_title')}' matches role criteria (+20 pts).")
+                    reasons.append(
+                        f"Job title '{lead.get('job_title')}' matches role criteria (+20 pts)."
+                    )
                     matched_role = True
                     break
             if not matched_role:
-                reasons.append(f"Job title '{lead.get('job_title')}' is not a target role keyword.")
+                reasons.append(
+                    f"Job title '{lead.get('job_title')}' is not a target role keyword."
+                )
         elif not target_roles:
             score += 20
             reasons.append("No campaign audience role criteria set (+20 pts).")
@@ -296,10 +361,12 @@ class LeadQualityService:
         for f in total_checks:
             if lead.get(f):
                 filled_fields += 1
-        
+
         comp_points = int((filled_fields / len(total_checks)) * 15)
         score += comp_points
-        reasons.append(f"Profile completeness: {filled_fields}/{len(total_checks)} core contact fields populated (+{comp_points} pts).")
+        reasons.append(
+            f"Profile completeness: {filled_fields}/{len(total_checks)} core contact fields populated (+{comp_points} pts)."
+        )
 
         # 5. Quality & Personalization checks (up to 15 pts)
         q_points = 0
@@ -320,12 +387,16 @@ class LeadQualityService:
             reasons.append("Campaign baseline rules validation checks (+5 pts).")
 
         # Append Disclaimer
-        reasons.append("Disclaimer: This score represents profile parameter alignment and does not predict actual outreach conversion probability.")
-        
+        reasons.append(
+            "Disclaimer: This score represents profile parameter alignment and does not predict actual outreach conversion probability."
+        )
+
         return min(score, 100), reasons
 
     @staticmethod
-    def find_existing_duplicate(lead: Dict[str, Any], user_id: str) -> Optional[Dict[str, Any]]:
+    def find_existing_duplicate(
+        lead: dict[str, Any], user_id: str
+    ) -> dict[str, Any] | None:
         """Identifies duplicate candidates matching email, domain+fullname, or website+email."""
         if not supabase:
             return None
@@ -338,7 +409,13 @@ class LeadQualityService:
         # 1. Match by email
         if email:
             try:
-                res = supabase.table("leads").select("*").eq("user_id", user_id).eq("contact_email", email).execute()
+                res = (
+                    supabase.table("leads")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("contact_email", email)
+                    .execute()
+                )
                 if res.data:
                     return res.data[0]
             except Exception:
@@ -347,7 +424,14 @@ class LeadQualityService:
         # 2. Match by website + email
         if website and email:
             try:
-                res = supabase.table("leads").select("*").eq("user_id", user_id).eq("website", website).eq("contact_email", email).execute()
+                res = (
+                    supabase.table("leads")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("website", website)
+                    .eq("contact_email", email)
+                    .execute()
+                )
                 if res.data:
                     return res.data[0]
             except Exception:
@@ -356,7 +440,13 @@ class LeadQualityService:
         # 3. Match by domain + full name
         if domain and full_name:
             try:
-                res = supabase.table("leads").select("*").eq("user_id", user_id).eq("full_name", full_name).execute()
+                res = (
+                    supabase.table("leads")
+                    .select("*")
+                    .eq("user_id", user_id)
+                    .eq("full_name", full_name)
+                    .execute()
+                )
                 for existing in res.data:
                     # Parse existing domain
                     existing_web = existing.get("website", "")
@@ -373,11 +463,8 @@ class LeadQualityService:
 
     @classmethod
     def resolve_duplicate_conflict(
-        cls, 
-        new_data: Dict[str, Any], 
-        existing_lead: Dict[str, Any], 
-        strategy: str
-    ) -> Tuple[str, Dict[str, Any]]:
+        cls, new_data: dict[str, Any], existing_lead: dict[str, Any], strategy: str
+    ) -> tuple[str, dict[str, Any]]:
         """
         Resolves conflicts using selection criteria strategy:
         - skip: return existing, don't write.
@@ -399,15 +486,24 @@ class LeadQualityService:
         for k, v in new_data.items():
             if k in ["id", "user_id", "created_at"]:
                 continue
-            
+
             existing_val = resolved.get(k)
             # Fill in only if existing is empty
-            if existing_val is None or existing_val == "" or existing_val == [] or existing_val == {}:
+            if (
+                existing_val is None
+                or existing_val == ""
+                or existing_val == []
+                or existing_val == {}
+            ):
                 resolved[k] = v
             elif k == "tags" and isinstance(v, list) and isinstance(existing_val, list):
                 # Unique tag union merging
                 resolved[k] = sorted(list(set(existing_val + v)))
-            elif k == "custom_fields" and isinstance(v, dict) and isinstance(existing_val, dict):
+            elif (
+                k == "custom_fields"
+                and isinstance(v, dict)
+                and isinstance(existing_val, dict)
+            ):
                 # Key merge for metadata dictionary
                 merged_cf = existing_val.copy()
                 for cf_k, cf_v in v.items():

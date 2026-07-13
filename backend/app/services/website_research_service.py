@@ -1,13 +1,12 @@
+import hashlib
+import ipaddress
+import json
 import logging
 import socket
-import ipaddress
-import hashlib
-import json
-import re
-from datetime import datetime, timedelta
-from typing import Dict, Any, List, Tuple
-from urllib.parse import urlparse, urljoin
 from contextlib import contextmanager
+from datetime import datetime, timedelta
+from typing import Any, Optional
+from urllib.parse import urljoin, urlparse
 
 import requests
 from bs4 import BeautifulSoup
@@ -23,6 +22,7 @@ gemini_service = GeminiService()
 
 # --- Security Filters ---
 
+
 def is_safe_ip(ip_str: str) -> bool:
     """
     Blocks local, loopback, private, multicast, link-local, and AWS metadata IPs.
@@ -30,7 +30,14 @@ def is_safe_ip(ip_str: str) -> bool:
     try:
         ip = ipaddress.ip_address(ip_str)
         # Block private, loopback, link-local, multicast, reserved ranges
-        if ip.is_loopback or ip.is_private or ip.is_link_local or ip.is_multicast or ip.is_reserved or ip.is_unspecified:
+        if (
+            ip.is_loopback
+            or ip.is_private
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
             return False
         # Block AWS/GCP Metadata endpoint
         if ip_str == "169.254.169.254":
@@ -40,7 +47,7 @@ def is_safe_ip(ip_str: str) -> bool:
         return False
 
 
-def resolve_safe_ips(hostname: str) -> List[str]:
+def resolve_safe_ips(hostname: str) -> list[str]:
     """
     Resolves a hostname to its IP addresses, filtering out unsafe ranges.
     """
@@ -75,6 +82,7 @@ def pinned_dns(hostname: str, ip: str):
 
 # --- Safe Page Fetcher ---
 
+
 def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
     """
     SSRF & Rebinding Safe Web Fetcher.
@@ -82,11 +90,15 @@ def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
     """
     parsed = urlparse(url)
     if parsed.scheme not in ["http", "https"]:
-        raise ValueError(f"Invalid URI scheme: '{parsed.scheme}'. Only HTTP/HTTPS are allowed.")
+        raise ValueError(
+            f"Invalid URI scheme: '{parsed.scheme}'. Only HTTP/HTTPS are allowed."
+        )
 
     # Restrict allowed ports to 80 and 443 to prevent scanning internal services
     if parsed.port is not None and parsed.port not in [80, 443]:
-        raise ValueError(f"Invalid URL port: '{parsed.port}'. Only standard HTTP/HTTPS ports (80/443) are allowed.")
+        raise ValueError(
+            f"Invalid URL port: '{parsed.port}'. Only standard HTTP/HTTPS ports (80/443) are allowed."
+        )
 
     current_url = url
     max_redirects = 3
@@ -100,7 +112,9 @@ def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
         # Resolve and validate IPs
         safe_ips = resolve_safe_ips(hostname)
         if not safe_ips:
-            raise ValueError(f"Host '{hostname}' resolved to unsafe private IP or DNS resolution failed.")
+            raise ValueError(
+                f"Host '{hostname}' resolved to unsafe private IP or DNS resolution failed."
+            )
 
         selected_ip = safe_ips[0]
 
@@ -115,7 +129,7 @@ def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
                 headers=headers,
                 timeout=timeout,
                 allow_redirects=False,
-                stream=True
+                stream=True,
             )
 
             # Handle Redirects manually to re-verify destination safety
@@ -131,7 +145,10 @@ def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
 
             # MIME content check
             content_type = response.headers.get("Content-Type", "")
-            if "text/html" not in content_type.lower() and "text/plain" not in content_type.lower():
+            if (
+                "text/html" not in content_type.lower()
+                and "text/plain" not in content_type.lower()
+            ):
                 raise ValueError(f"Unsupported MIME Type: {content_type}")
 
             # Read stream up to max_size limit
@@ -149,7 +166,8 @@ def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
 
 # --- Content Parser & Extractor ---
 
-def extract_visible_content(html: str) -> Dict[str, str]:
+
+def extract_visible_content(html: str) -> dict[str, str]:
     """
     Parses title, meta tags, and strips styles/scripts/footers for clean text summaries.
     """
@@ -165,7 +183,9 @@ def extract_visible_content(html: str) -> Dict[str, str]:
 
     # Meta description extraction
     meta_desc = ""
-    desc_tag = soup.find("meta", attrs={"name": "description"}) or soup.find("meta", attrs={"property": "og:description"})
+    desc_tag = soup.find("meta", attrs={"name": "description"}) or soup.find(
+        "meta", attrs={"property": "og:description"}
+    )
     if desc_tag and isinstance(desc_tag, dict) and desc_tag.get("content"):
         meta_desc = desc_tag["content"].strip()
     elif desc_tag and hasattr(desc_tag, "get") and desc_tag.get("content"):
@@ -176,7 +196,11 @@ def extract_visible_content(html: str) -> Dict[str, str]:
         tag.decompose()
 
     # visible clean text
-    lines = [line.strip() for line in soup.get_text(separator="\n").splitlines() if line.strip()]
+    lines = [
+        line.strip()
+        for line in soup.get_text(separator="\n").splitlines()
+        if line.strip()
+    ]
     cleaned_body = "\n".join(lines)
     # limit to 3000 chars per page
     cleaned_body = cleaned_body[:3000]
@@ -184,16 +208,19 @@ def extract_visible_content(html: str) -> Dict[str, str]:
     return {
         "title": title[:200],
         "meta_description": meta_desc[:500],
-        "body_text": cleaned_body
+        "body_text": cleaned_body,
     }
 
 
 # --- Website Research Service ---
 
+
 class WebsiteResearchService:
 
     @classmethod
-    def research_lead_website(cls, lead_id: str, website: str, refresh: bool = False) -> Dict[str, Any]:
+    def research_lead_website(
+        cls, lead_id: str, website: str, refresh: bool = False
+    ) -> dict[str, Any]:
         """
         Main runner: validates, checks cache, crawls up to 4 pages safely,
         parses visible texts, and triggers prompt-injection protected structured AI summaries.
@@ -202,14 +229,18 @@ class WebsiteResearchService:
             raise ValueError("Lead has no configured website URL to fetch.")
 
         normalized_url = website.strip()
-        if not normalized_url.startswith("http://") and not normalized_url.startswith("https://"):
+        if not normalized_url.startswith("http://") and not normalized_url.startswith(
+            "https://"
+        ):
             normalized_url = "https://" + normalized_url
 
         # 1. Caching check (within 7 days)
         if not refresh:
             cached = cls._get_cached_research(lead_id)
             if cached:
-                logger.info(f"Reusing cached website research summary for lead {lead_id}")
+                logger.info(
+                    f"Reusing cached website research summary for lead {lead_id}"
+                )
                 return cached
 
         # 2. robots.txt parsing checks
@@ -235,7 +266,7 @@ class WebsiteResearchService:
                 "campaign_relevance": "Unchecked - robots.txt restrictions active.",
                 "uncertainty_warnings": ["Robots.txt blocks scraper crawlers."],
                 "sources": [normalized_url],
-                "timestamp": datetime.utcnow().isoformat()
+                "timestamp": datetime.utcnow().isoformat(),
             }
 
         # 3. Safe Crawler - Crawl Homepage + about + services + contact
@@ -243,7 +274,7 @@ class WebsiteResearchService:
             normalized_url,
             urljoin(normalized_url, "/about"),
             urljoin(normalized_url, "/services"),
-            urljoin(normalized_url, "/contact")
+            urljoin(normalized_url, "/contact"),
         ]
 
         extracted_texts = []
@@ -273,7 +304,7 @@ class WebsiteResearchService:
                         "campaign_relevance": "Unknown",
                         "uncertainty_warnings": [str(e)],
                         "sources": [normalized_url],
-                        "timestamp": datetime.utcnow().isoformat()
+                        "timestamp": datetime.utcnow().isoformat(),
                     }
 
         combined_text = "\n\n=== NEXT PAGE ===\n\n".join(extracted_texts)
@@ -287,15 +318,19 @@ class WebsiteResearchService:
 
         return {
             "summary": structured_summary.get("summary", "No summary generated"),
-            "personalization_facts": structured_summary.get("personalization_facts", []),
-            "campaign_relevance": structured_summary.get("campaign_relevance", "Unknown"),
+            "personalization_facts": structured_summary.get(
+                "personalization_facts", []
+            ),
+            "campaign_relevance": structured_summary.get(
+                "campaign_relevance", "Unknown"
+            ),
             "uncertainty_warnings": structured_summary.get("uncertainty_warnings", []),
             "sources": source_urls,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.utcnow().isoformat(),
         }
 
     @classmethod
-    def _generate_ai_summary(cls, web_content: str) -> Dict[str, Any]:
+    def _generate_ai_summary(cls, web_content: str) -> dict[str, Any]:
         """
         Sends extracted text to Gemini, wrapping instructions to defend against prompt injections.
         """
@@ -328,27 +363,24 @@ Generate a JSON object matching this schema exactly:
 """
         # Setup Gemini client
         client = gemini_service._get_client()
-        
+
         if settings.DEMO_MODE and not gemini_service.api_key:
             return {
                 "summary": "Delta Roofing offers premium commercial roofing services in Boston.",
                 "personalization_facts": [
                     "Maintains commercial repair portfolios",
-                    "Located in Boston area"
+                    "Located in Boston area",
                 ],
                 "campaign_relevance": "Strong fit for logistics automation products.",
-                "uncertainty_warnings": ["No client case-studies found."]
+                "uncertainty_warnings": ["No client case-studies found."],
             }
 
         try:
             config = types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.2
+                response_mime_type="application/json", temperature=0.2
             )
             response = client.models.generate_content(
-                model=settings.gemini_models[0],
-                contents=prompt,
-                config=config
+                model=settings.gemini_models[0], contents=prompt, config=config
             )
             raw = getattr(response, "text", "").strip()
             return json.loads(raw)
@@ -358,59 +390,80 @@ Generate a JSON object matching this schema exactly:
                 "summary": "Website content retrieved but summary generation failed.",
                 "personalization_facts": [],
                 "campaign_relevance": "Unknown",
-                "uncertainty_warnings": [f"AI error: {e}"]
+                "uncertainty_warnings": [f"AI error: {e}"],
             }
 
     @classmethod
-    def _get_cached_research(cls, lead_id: str) -> Optional[Dict[str, Any]]:
+    def _get_cached_research(cls, lead_id: str) -> Optional[dict[str, Any]]:
         if not supabase:
             return None
         try:
-            res = supabase.table("research_snapshots").select("*").eq("lead_id", lead_id).eq("research_type", "website").execute()
+            res = (
+                supabase.table("research_snapshots")
+                .select("*")
+                .eq("lead_id", lead_id)
+                .eq("research_type", "website")
+                .execute()
+            )
             if res.data:
                 snap = res.data[0]
-                created_dt = datetime.fromisoformat(snap["created_at"].replace("Z", "+00:00"))
+                created_dt = datetime.fromisoformat(
+                    snap["created_at"].replace("Z", "+00:00")
+                )
                 # If cached within 7 days
-                if datetime.utcnow().replace(tzinfo=created_dt.tzinfo) - created_dt < timedelta(days=7):
+                if datetime.utcnow().replace(
+                    tzinfo=created_dt.tzinfo
+                ) - created_dt < timedelta(days=7):
                     # Parse structured summary
                     summary_data = json.loads(snap["structured_summary"])
                     raw_data = json.loads(snap["raw_data"])
-                    
+
                     return {
                         "summary": summary_data.get("summary"),
-                        "personalization_facts": summary_data.get("personalization_facts"),
+                        "personalization_facts": summary_data.get(
+                            "personalization_facts"
+                        ),
                         "campaign_relevance": summary_data.get("campaign_relevance"),
-                        "uncertainty_warnings": summary_data.get("uncertainty_warnings"),
+                        "uncertainty_warnings": summary_data.get(
+                            "uncertainty_warnings"
+                        ),
                         "sources": raw_data.get("sources"),
-                        "timestamp": snap["created_at"]
+                        "timestamp": snap["created_at"],
                     }
         except Exception as e:
             logger.warning(f"Failed to retrieve cached research: {e}")
         return None
 
     @classmethod
-    def _save_research_cache(cls, lead_id: str, sources: List[str], text_hash: str, summary_data: Dict[str, Any]):
+    def _save_research_cache(
+        cls,
+        lead_id: str,
+        sources: list[str],
+        text_hash: str,
+        summary_data: dict[str, Any],
+    ):
         if not supabase:
             return
-        
+
         # De-duplicate existing
         try:
-            supabase.table("research_snapshots").delete().eq("lead_id", lead_id).eq("research_type", "website").execute()
+            supabase.table("research_snapshots").delete().eq("lead_id", lead_id).eq(
+                "research_type", "website"
+            ).execute()
         except Exception:
             pass
 
-        raw_payload = {
-            "sources": sources,
-            "hash": text_hash
-        }
-        
+        raw_payload = {"sources": sources, "hash": text_hash}
+
         snap_payload = {
-            "id": str(socket.gethostname()) + "_" + str(datetime.utcnow().timestamp()), # basic ID
+            "id": str(socket.gethostname())
+            + "_"
+            + str(datetime.utcnow().timestamp()),  # basic ID
             "lead_id": lead_id,
             "research_type": "website",
             "raw_data": json.dumps(raw_payload),
             "structured_summary": json.dumps(summary_data),
-            "created_at": datetime.utcnow().isoformat()
+            "created_at": datetime.utcnow().isoformat(),
         }
         try:
             supabase.table("research_snapshots").insert(snap_payload).execute()

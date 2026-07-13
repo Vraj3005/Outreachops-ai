@@ -1,5 +1,5 @@
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request
 
@@ -11,8 +11,8 @@ from app.crud.campaigns import (
 )
 from app.database import supabase
 from app.schemas.campaign import Campaign, CampaignBase, CampaignCreate, CampaignUpdate
-from app.utils.auth import require_owner
 from app.services.audit_log_service import AuditLogService
+from app.utils.auth import require_owner
 
 logger = logging.getLogger("outreachops.routes.campaigns")
 
@@ -83,12 +83,12 @@ async def create_campaign_endpoint(
     res = create_campaign(payload)
     if not res:
         raise HTTPException(status_code=500, detail="Failed to create campaign")
-    
+
     AuditLogService.log_event(
         user_id=owner["id"],
         action="create_campaign",
         details=f"Created campaign '{payload.name}' (ID: {res['id']})",
-        request=request
+        request=request,
     )
     return Campaign(**res)
 
@@ -107,6 +107,7 @@ async def update_campaign_endpoint(
         raise HTTPException(status_code=400, detail="Payload is required")
 
     from app.crud.campaigns import get_campaign
+
     existing = get_campaign(id)
     if not existing or existing.get("user_id") != owner["id"]:
         raise HTTPException(status_code=404, detail=f"Campaign '{id}' not found")
@@ -128,7 +129,7 @@ async def update_campaign_endpoint(
         user_id=owner["id"],
         action="update_campaign",
         details=f"Updated campaign '{res.get('name')}' (ID: {id})",
-        request=request
+        request=request,
     )
     return Campaign(**res)
 
@@ -143,21 +144,24 @@ async def delete_campaign_endpoint(
     Delete a campaign.
     """
     from app.crud.campaigns import get_campaign
+
     existing = get_campaign(id)
     if not existing or existing.get("user_id") != owner["id"]:
-        raise HTTPException(status_code=404, detail="Campaign not found or deletion failed")
+        raise HTTPException(
+            status_code=404, detail="Campaign not found or deletion failed"
+        )
 
     success = delete_campaign(id)
     if not success:
         raise HTTPException(
             status_code=404, detail="Campaign not found or deletion failed"
         )
-    
+
     AuditLogService.log_event(
         user_id=owner["id"],
         action="delete_campaign",
         details=f"Deleted campaign ID: {id}",
-        request=request
+        request=request,
     )
     return {"message": "Campaign deleted successfully"}
 
@@ -268,15 +272,22 @@ async def clone_campaign(
     """
     Clone a campaign and its associated sequence/steps.
     """
-    import uuid
     import json
+    import uuid
+
     from app.routes.settings import get_owner_settings_sync
 
     if not supabase:
         raise HTTPException(status_code=500, detail="Database client offline")
 
     # 1. Fetch original campaign
-    original_res = supabase.table("campaigns").select("*").eq("id", id).eq("user_id", owner["id"]).execute()
+    original_res = (
+        supabase.table("campaigns")
+        .select("*")
+        .eq("id", id)
+        .eq("user_id", owner["id"])
+        .execute()
+    )
     if not original_res.data:
         raise HTTPException(status_code=404, detail="Campaign not found")
     orig = original_res.data[0]
@@ -286,18 +297,18 @@ async def clone_campaign(
     sender_snapshot = {
         "sender_name": owner_settings.get("sender_name"),
         "sender_email": owner_settings.get("sender_email"),
-        "default_signature": owner_settings.get("default_signature")
+        "default_signature": owner_settings.get("default_signature"),
     }
     prompt_snapshot = {
         "brand_voice": owner_settings.get("brand_voice"),
         "offer_description": owner_settings.get("offer_description"),
-        "default_tone": owner_settings.get("default_tone")
+        "default_tone": owner_settings.get("default_tone"),
     }
 
     # 3. Create cloned campaign dictionary
     cloned_id = str(uuid.uuid4())
     cloned_campaign = dict(orig)
-    
+
     # Strip audit/primary columns
     for k in ["id", "created_at", "updated_at"]:
         if k in cloned_campaign:
@@ -325,15 +336,20 @@ async def clone_campaign(
                         del cloned_seq[k]
                 cloned_seq["id"] = cloned_seq_id
                 cloned_seq["name"] = f"Sequence for Copy of {orig['name']}"
-                
+
                 # Insert sequence
                 supabase.table("sequences").insert(cloned_seq).execute()
                 cloned_campaign["sequence_id"] = cloned_seq_id
 
                 # Fetch steps
-                steps_res = supabase.table("sequence_steps").select("*").eq("sequence_id", seq_id).execute()
+                steps_res = (
+                    supabase.table("sequence_steps")
+                    .select("*")
+                    .eq("sequence_id", seq_id)
+                    .execute()
+                )
                 cloned_steps = []
-                for step in (steps_res.data or []):
+                for step in steps_res.data or []:
                     cloned_step = dict(step)
                     for k in ["id", "created_at", "updated_at"]:
                         if k in cloned_step:
@@ -341,7 +357,7 @@ async def clone_campaign(
                     cloned_step["id"] = str(uuid.uuid4())
                     cloned_step["sequence_id"] = cloned_seq_id
                     cloned_steps.append(cloned_step)
-                
+
                 if cloned_steps:
                     supabase.table("sequence_steps").insert(cloned_steps).execute()
         except Exception as e:
@@ -351,27 +367,36 @@ async def clone_campaign(
     try:
         ins_res = supabase.table("campaigns").insert(cloned_campaign).execute()
         if not ins_res.data:
-            raise HTTPException(status_code=500, detail="Failed to save cloned campaign record")
+            raise HTTPException(
+                status_code=500, detail="Failed to save cloned campaign record"
+            )
         return Campaign(**ins_res.data[0])
     except Exception as e:
         logger.error(f"Cloning insert failed: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to clone campaign: {str(e)}")
+        raise HTTPException(
+            status_code=500, detail=f"Failed to clone campaign: {str(e)}"
+        )
 
 
 from typing import Optional
+
 from pydantic import BaseModel
+
+
 class CampaignPreviewRequest(BaseModel):
-    objective: Optional[str] = None
-    offer: Optional[str] = None
-    value_proposition: Optional[str] = None
+    objective: str | None = None
+    offer: str | None = None
+    value_proposition: str | None = None
     tone: str = "professional"
     email_length: str = "medium"
-    CTA: Optional[str] = None
+    CTA: str | None = None
     banned_content: list[str] = []
+
 
 class PreviewDraftResponse(BaseModel):
     subject: str
     body: str
+
 
 @router.post("/preview-drafts", response_model=list[PreviewDraftResponse])
 async def preview_campaign_drafts(
@@ -381,27 +406,48 @@ async def preview_campaign_drafts(
     Generates 3 mock email draft previews for given campaign parameters.
     """
     try:
-        res = supabase.table("leads").select("*").eq("user_id", owner["id"]).limit(3).execute()
+        res = (
+            supabase.table("leads")
+            .select("*")
+            .eq("user_id", owner["id"])
+            .limit(3)
+            .execute()
+        )
         leads_data = res.data or []
     except Exception:
         leads_data = []
 
     if not leads_data:
         leads_data = [
-            {"company_name": "Acme Builders", "website": "https://acmebuilders.com", "first_name": "Alice", "job_title": "Project Manager"},
-            {"company_name": "Apex Roofing", "website": "https://apexroofing.com", "first_name": "Bob", "job_title": "Owner"},
-            {"company_name": "Summit Electric", "website": "https://summitelectric.com", "first_name": "Charlie", "job_title": "Operations Lead"}
+            {
+                "company_name": "Acme Builders",
+                "website": "https://acmebuilders.com",
+                "first_name": "Alice",
+                "job_title": "Project Manager",
+            },
+            {
+                "company_name": "Apex Roofing",
+                "website": "https://apexroofing.com",
+                "first_name": "Bob",
+                "job_title": "Owner",
+            },
+            {
+                "company_name": "Summit Electric",
+                "website": "https://summitelectric.com",
+                "first_name": "Charlie",
+                "job_title": "Operations Lead",
+            },
         ]
 
     previews = []
     for lead in leads_data:
         company = lead.get("company_name") or "Company"
         first_name = lead.get("first_name") or "Team"
-        
+
         objective_desc = payload.objective or "introduce our services"
         offer_desc = payload.offer or "custom operational improvements"
         cta_desc = payload.CTA or "Would you be open to a brief chat next week?"
-        
+
         subject = f"Improving operational workflows for {company}"
         body = (
             f"Hello {first_name},\n\n"
@@ -418,23 +464,22 @@ async def preview_campaign_drafts(
 
 
 class CreateJobRequest(BaseModel):
-    lead_ids: Optional[list[str]] = None
+    lead_ids: list[str] | None = None
     sample_only: bool = False
     regenerate: bool = False
-    prompt_version_id: Optional[str] = None
-    model_override_config: Optional[dict[str, Any]] = None
+    prompt_version_id: str | None = None
+    model_override_config: dict[str, Any] | None = None
 
 
 @router.post("/{id}/jobs")
 async def trigger_campaign_generation_job(
-    id: str,
-    payload: CreateJobRequest,
-    owner: dict = Depends(require_owner)
+    id: str, payload: CreateJobRequest, owner: dict = Depends(require_owner)
 ):
     """
     Spawns an asynchronous batch generation job for target leads in the campaign.
     """
     from app.services.generation_job_service import GenerationJobService
+
     try:
         job = GenerationJobService.create_generation_job(
             campaign_id=id,
@@ -443,7 +488,7 @@ async def trigger_campaign_generation_job(
             sample_only=payload.sample_only,
             regenerate=payload.regenerate,
             prompt_version_id=payload.prompt_version_id,
-            model_config=payload.model_override_config
+            model_config=payload.model_override_config,
         )
         return job
     except ValueError as e:
@@ -453,33 +498,41 @@ async def trigger_campaign_generation_job(
 
 
 @router.get("/{id}/jobs")
-async def list_campaign_generation_jobs(
-    id: str,
-    owner: dict = Depends(require_owner)
-):
+async def list_campaign_generation_jobs(id: str, owner: dict = Depends(require_owner)):
     """
     Lists historical generation jobs spawned for this campaign.
     """
-    res = supabase.table("generation_jobs").select("*").eq("campaign_id", id).eq("user_id", owner["id"]).order("created_at", desc=True).execute()
+    res = (
+        supabase.table("generation_jobs")
+        .select("*")
+        .eq("campaign_id", id)
+        .eq("user_id", owner["id"])
+        .order("created_at", desc=True)
+        .execute()
+    )
     return res.data or []
 
 
 @router.get("/jobs/{job_id}")
-async def get_job_details(
-    job_id: str,
-    owner: dict = Depends(require_owner)
-):
+async def get_job_details(job_id: str, owner: dict = Depends(require_owner)):
     """
     Retrieves status counts and configuration snapshots for a specific job.
     """
     # Force sync before returning status
     from app.services.generation_job_service import GenerationJobService
+
     try:
         GenerationJobService.sync_job_counts(job_id)
     except Exception:
         pass
 
-    res = supabase.table("generation_jobs").select("*").eq("id", job_id).eq("user_id", owner["id"]).execute()
+    res = (
+        supabase.table("generation_jobs")
+        .select("*")
+        .eq("id", job_id)
+        .eq("user_id", owner["id"])
+        .execute()
+    )
     if not res.data:
         raise HTTPException(status_code=404, detail="Job not found")
     return res.data[0]
@@ -487,35 +540,37 @@ async def get_job_details(
 
 @router.get("/jobs/{job_id}/items")
 async def list_job_items(
-    job_id: str,
-    status: Optional[str] = None,
-    owner: dict = Depends(require_owner)
+    job_id: str, status: str | None = None, owner: dict = Depends(require_owner)
 ):
     """
     Retrieves individual execution items queued under the job.
     """
     # Verify owner has access to job
-    job_res = supabase.table("generation_jobs").select("id").eq("id", job_id).eq("user_id", owner["id"]).execute()
+    job_res = (
+        supabase.table("generation_jobs")
+        .select("id")
+        .eq("id", job_id)
+        .eq("user_id", owner["id"])
+        .execute()
+    )
     if not job_res.data:
         raise HTTPException(status_code=404, detail="Job not found")
 
     query = supabase.table("generation_job_items").select("*").eq("job_id", job_id)
     if status:
         query = query.eq("status", status)
-    
+
     res = query.order("created_at").execute()
     return res.data or []
 
 
 @router.post("/jobs/{job_id}/cancel")
-async def cancel_job(
-    job_id: str,
-    owner: dict = Depends(require_owner)
-):
+async def cancel_job(job_id: str, owner: dict = Depends(require_owner)):
     """
     Cancels pending items queued in the job.
     """
     from app.services.generation_job_service import GenerationJobService
+
     try:
         return GenerationJobService.cancel_generation_job(job_id, owner["id"])
     except ValueError as e:
@@ -523,14 +578,12 @@ async def cancel_job(
 
 
 @router.post("/jobs/{job_id}/retry")
-async def retry_failed_items(
-    job_id: str,
-    owner: dict = Depends(require_owner)
-):
+async def retry_failed_items(job_id: str, owner: dict = Depends(require_owner)):
     """
     Retries failed or cancelled items within the job.
     """
     from app.services.generation_job_service import GenerationJobService
+
     try:
         return GenerationJobService.retry_job_failures(job_id, owner["id"])
     except ValueError as e:
@@ -538,56 +591,62 @@ async def retry_failed_items(
 
 
 @router.post("/jobs/{job_id}/resume")
-async def resume_stalled_job(
-    job_id: str,
-    owner: dict = Depends(require_owner)
-):
+async def resume_stalled_job(job_id: str, owner: dict = Depends(require_owner)):
     """
     Resumes stalled items in processing/pending state.
     """
     from app.services.generation_job_service import GenerationJobService
+
     try:
         return GenerationJobService.resume_job(job_id, owner["id"])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
-from pydantic import BaseModel
 import uuid
+
+from pydantic import BaseModel
+
 
 class SequenceStepSave(BaseModel):
     name: str
     step_number: int
     delay_amount: int
     delay_unit: str
-    body_template_version_id: Optional[str] = None
-    subject_template_version_id: Optional[str] = None
-    custom_instructions: Optional[str] = None
+    body_template_version_id: str | None = None
+    subject_template_version_id: str | None = None
+    custom_instructions: str | None = None
     require_manual_approval: bool = True
+
 
 class SaveSequenceStepsRequest(BaseModel):
     steps: list[SequenceStepSave]
+
 
 class EnrollLeadsRequest(BaseModel):
     lead_ids: list[str]
 
 
 @router.get("/{id}/sequence")
-async def get_campaign_sequence(
-    id: str,
-    owner: dict = Depends(require_owner)
-):
+async def get_campaign_sequence(id: str, owner: dict = Depends(require_owner)):
     """
     Returns sequence steps details for the campaign.
     """
     from app.services.sequence_service import SequenceService
+
     try:
         seq_id = SequenceService.get_or_create_default_sequence(id, owner["id"])
         seq_res = supabase.table("sequences").select("*").eq("id", seq_id).execute()
-        steps_res = supabase.table("sequence_steps").select("*").eq("sequence_id", seq_id).order("step_number").execute()
+        steps_res = (
+            supabase.table("sequence_steps")
+            .select("*")
+            .eq("sequence_id", seq_id)
+            .order("step_number")
+            .execute()
+        )
         return {
             "sequence": seq_res.data[0] if seq_res.data else {},
-            "steps": steps_res.data or []
+            "steps": steps_res.data or [],
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -595,54 +654,54 @@ async def get_campaign_sequence(
 
 @router.post("/{id}/sequence/steps")
 async def save_campaign_sequence_steps(
-    id: str,
-    payload: SaveSequenceStepsRequest,
-    owner: dict = Depends(require_owner)
+    id: str, payload: SaveSequenceStepsRequest, owner: dict = Depends(require_owner)
 ):
     """
     Updates the sequence steps for the campaign.
     """
     from app.services.sequence_service import SequenceService
+
     try:
         seq_id = SequenceService.get_or_create_default_sequence(id, owner["id"])
-        
+
         # Delete old steps
         supabase.table("sequence_steps").delete().eq("sequence_id", seq_id).execute()
-        
+
         # Insert new steps
         insert_payloads = []
         for step in payload.steps:
-            insert_payloads.append({
-                "id": str(uuid.uuid4()),
-                "sequence_id": seq_id,
-                "step_number": step.step_number,
-                "name": step.name,
-                "delay_amount": step.delay_amount,
-                "delay_unit": step.delay_unit,
-                "body_template_version_id": step.body_template_version_id,
-                "subject_template_version_id": step.subject_template_version_id,
-                "custom_instructions": step.custom_instructions,
-                "require_manual_approval": 1 if step.require_manual_approval else 0
-            })
-        
+            insert_payloads.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "sequence_id": seq_id,
+                    "step_number": step.step_number,
+                    "name": step.name,
+                    "delay_amount": step.delay_amount,
+                    "delay_unit": step.delay_unit,
+                    "body_template_version_id": step.body_template_version_id,
+                    "subject_template_version_id": step.subject_template_version_id,
+                    "custom_instructions": step.custom_instructions,
+                    "require_manual_approval": 1 if step.require_manual_approval else 0,
+                }
+            )
+
         if insert_payloads:
             supabase.table("sequence_steps").insert(insert_payloads).execute()
-            
+
         return {"status": "success", "steps_count": len(insert_payloads)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{id}/timeline")
-async def get_campaign_leads_timeline(
-    id: str,
-    owner: dict = Depends(require_owner)
-):
+async def get_campaign_leads_timeline(id: str, owner: dict = Depends(require_owner)):
     """
     Returns progress stats of all leads enrolled in the campaign.
     """
     try:
-        leads_res = supabase.table("campaign_leads").select("*").eq("campaign_id", id).execute()
+        leads_res = (
+            supabase.table("campaign_leads").select("*").eq("campaign_id", id).execute()
+        )
         return leads_res.data or []
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -650,14 +709,13 @@ async def get_campaign_leads_timeline(
 
 @router.post("/{id}/leads/enroll")
 async def enroll_leads_in_sequence(
-    id: str,
-    payload: EnrollLeadsRequest,
-    owner: dict = Depends(require_owner)
+    id: str, payload: EnrollLeadsRequest, owner: dict = Depends(require_owner)
 ):
     """
     Enrolls a list of lead IDs in the campaign sequence.
     """
     from app.services.sequence_service import SequenceService
+
     results = []
     for lead_id in payload.lead_ids:
         try:
@@ -669,38 +727,36 @@ async def enroll_leads_in_sequence(
 
 
 @router.post("/{id}/leads/pause")
-async def pause_sequence_processing(
-    id: str,
-    owner: dict = Depends(require_owner)
-):
+async def pause_sequence_processing(id: str, owner: dict = Depends(require_owner)):
     """
     Pauses campaign sequence processing by transitioning running states to paused stop status.
     """
     try:
         # Update campaign lead statuses to stopped
-        supabase.table("campaign_leads").update({
-            "status": "stopped",
-            "stopped_reason": "Campaign paused"
-        }).eq("campaign_id", id).in_("status", ["awaiting_generation", "awaiting_approval", "scheduled", "waiting"]).execute()
-        
+        supabase.table("campaign_leads").update(
+            {"status": "stopped", "stopped_reason": "Campaign paused"}
+        ).eq("campaign_id", id).in_(
+            "status",
+            ["awaiting_generation", "awaiting_approval", "scheduled", "waiting"],
+        ).execute()
+
         return {"status": "success", "message": "Campaign leads sequence paused"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.post("/{id}/leads/resume")
-async def resume_sequence_processing(
-    id: str,
-    owner: dict = Depends(require_owner)
-):
+async def resume_sequence_processing(id: str, owner: dict = Depends(require_owner)):
     """
     Resumes sequence processing for paused campaign leads.
     """
     from app.services.sequence_service import SequenceService
+
     try:
         SequenceService.recalculate_paused_campaign_leads(id)
-        return {"status": "success", "message": "Resumed sequence calculations successfully"}
+        return {
+            "status": "success",
+            "message": "Resumed sequence calculations successfully",
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
-

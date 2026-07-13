@@ -1,27 +1,28 @@
 import re
+
 from pydantic import BaseModel, Field, model_validator
-from typing import Optional, List
+
 
 class OwnerSettingsBase(BaseModel):
-    business_name: Optional[str] = Field(None, max_length=150)
-    website: Optional[str] = Field(None, max_length=255)
-    sender_name: Optional[str] = Field(None, max_length=100)
-    sender_email: Optional[str] = None
-    sender_phone: Optional[str] = None
-    default_signature: Optional[str] = None
-    brand_voice: Optional[str] = None
-    offer_description: Optional[str] = None
-    default_target_audience: Optional[str] = None
-    default_tone: Optional[str] = Field(None, max_length=50)
-    default_cta: Optional[str] = None
+    business_name: str | None = Field(None, max_length=150)
+    website: str | None = Field(None, max_length=255)
+    sender_name: str | None = Field(None, max_length=100)
+    sender_email: str | None = None
+    sender_phone: str | None = None
+    default_signature: str | None = None
+    brand_voice: str | None = None
+    offer_description: str | None = None
+    default_target_audience: str | None = None
+    default_tone: str | None = Field(None, max_length=50)
+    default_cta: str | None = None
     default_language: str = Field("en", max_length=10)
     timezone: str = Field("UTC", max_length=50)
     daily_send_limit: int = Field(50, ge=1, le=1000)
     minimum_send_spacing_seconds: int = Field(60, ge=5, le=3600)
     allowed_send_start: str = Field("09:00")
     allowed_send_end: str = Field("17:00")
-    required_footer: Optional[str] = None
-    banned_phrases: List[str] = Field(default_factory=list)
+    required_footer: str | None = None
+    banned_phrases: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_hours_and_domain(self) -> "OwnerSettingsBase":
@@ -36,11 +37,14 @@ class OwnerSettingsBase(BaseModel):
                 raise ValueError("sender_email must be a valid email address format")
         return self
 
+
 class OwnerSettingsCreate(OwnerSettingsBase):
     pass
 
+
 class OwnerSettingsUpdate(OwnerSettingsBase):
     pass
+
 
 class OwnerSettingsResponse(OwnerSettingsBase):
     owner_id: str

@@ -1,8 +1,7 @@
-import json
-import pytest
-import os
-from unittest import mock
 import datetime
+import os
+
+import pytest
 
 from app.database import SQLiteSupabaseClient
 
@@ -14,17 +13,19 @@ test_sqlite_client = SQLiteSupabaseClient(db_path)
 supabase = test_sqlite_client
 
 import app.database
+
 app.database.supabase = test_sqlite_client
 
 import app.services.generation_job_service
+
 app.services.generation_job_service.supabase = test_sqlite_client
 
 import app.services.generation_worker
+
 app.services.generation_worker.supabase = test_sqlite_client
 
 from app.services.generation_job_service import GenerationJobService
 from app.services.generation_worker import GenerationWorker
-
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +37,7 @@ def clean_db():
 
 # --- 1. Idempotency Key Checks ---
 
+
 def test_idempotency_key_enforcement():
     # Attempt to insert items with duplicate idempotency keys
     campaign_id = "camp-123"
@@ -43,7 +45,7 @@ def test_idempotency_key_enforcement():
     lead_id = "lead-456"
     seq_step = "step-789"
     idempotency_key = f"{job_id}:{lead_id}:{seq_step}"
-    
+
     # Payload
     item_1 = {
         "id": "item-1",
@@ -52,9 +54,9 @@ def test_idempotency_key_enforcement():
         "sequence_step_id": seq_step,
         "status": "pending",
         "attempts": 0,
-        "idempotency_key": idempotency_key
+        "idempotency_key": idempotency_key,
     }
-    
+
     item_2 = {
         "id": "item-2",
         "job_id": job_id,
@@ -62,7 +64,7 @@ def test_idempotency_key_enforcement():
         "sequence_step_id": seq_step,
         "status": "pending",
         "attempts": 0,
-        "idempotency_key": idempotency_key
+        "idempotency_key": idempotency_key,
     }
 
     # Insert first item
@@ -74,7 +76,12 @@ def test_idempotency_key_enforcement():
         supabase.table("generation_job_items").insert(item_2).execute()
         # If it was SQLite client without strict UNIQUE check on dynamic columns, check local constraints:
         # Let's query to ensure only one exists
-        res = supabase.table("generation_job_items").select("*").eq("idempotency_key", idempotency_key).execute()
+        res = (
+            supabase.table("generation_job_items")
+            .select("*")
+            .eq("idempotency_key", idempotency_key)
+            .execute()
+        )
         assert len(res.data) == 1
     except Exception:
         # Success - double insert prevented by DB constraints
@@ -82,6 +89,7 @@ def test_idempotency_key_enforcement():
 
 
 # --- 2. Duplicate Worker Claims Mitigation ---
+
 
 def test_duplicate_worker_claims():
     # Insert multiple pending items
@@ -95,7 +103,7 @@ def test_duplicate_worker_claims():
             "attempts": 0,
             "idempotency_key": f"key-worker-{i}",
             "created_at": datetime.datetime.utcnow().isoformat(),
-            "updated_at": datetime.datetime.utcnow().isoformat()
+            "updated_at": datetime.datetime.utcnow().isoformat(),
         }
         for i in range(5)
     ]
@@ -123,6 +131,7 @@ def test_duplicate_worker_claims():
 
 # --- 3. Provider Timeouts and Transient Errors ---
 
+
 def test_transient_failure_reschedules():
     item_id = "item-transient-test"
     job_id = "job-transient-test"
@@ -134,7 +143,7 @@ def test_transient_failure_reschedules():
         "attempts": 1,
         "idempotency_key": "key-transient",
         "created_at": datetime.datetime.utcnow().isoformat(),
-        "updated_at": datetime.datetime.utcnow().isoformat()
+        "updated_at": datetime.datetime.utcnow().isoformat(),
     }
     supabase.table("generation_job_items").insert(item).execute()
 
@@ -154,6 +163,7 @@ def test_transient_failure_reschedules():
 
 # --- 4. Malformed AI Output (Permanent Failures) ---
 
+
 def test_malformed_ai_output_fails_immediately():
     item_id = "item-malformed-test"
     job_id = "job-malformed-test"
@@ -165,7 +175,7 @@ def test_malformed_ai_output_fails_immediately():
         "attempts": 1,
         "idempotency_key": "key-malformed",
         "created_at": datetime.datetime.utcnow().isoformat(),
-        "updated_at": datetime.datetime.utcnow().isoformat()
+        "updated_at": datetime.datetime.utcnow().isoformat(),
     }
     supabase.table("generation_job_items").insert(item).execute()
 
@@ -174,12 +184,14 @@ def test_malformed_ai_output_fails_immediately():
         "id": job_id,
         "user_id": "owner-1",
         "campaign_id": "camp-malformed",
-        "status": "running"
+        "status": "running",
     }
     supabase.table("generation_jobs").insert(job_payload).execute()
 
     # Mark as failed permanently
-    GenerationWorker._mark_failed(item, "permanent", "Malformed AI output structure. Missing subject or body.")
+    GenerationWorker._mark_failed(
+        item, "permanent", "Malformed AI output structure. Missing subject or body."
+    )
 
     # Verify status is failed
     res = supabase.table("generation_job_items").select("*").eq("id", item_id).execute()
@@ -191,16 +203,17 @@ def test_malformed_ai_output_fails_immediately():
 
 # --- 5. Cancellation Safety ---
 
+
 def test_job_cancellation():
     job_id = "job-cancel-test"
     user_id = "owner-cancel"
-    
+
     # Spawn Job Header
     job_payload = {
         "id": job_id,
         "user_id": user_id,
         "campaign_id": "camp-cancel",
-        "status": "pending"
+        "status": "pending",
     }
     supabase.table("generation_jobs").insert(job_payload).execute()
 
@@ -211,22 +224,22 @@ def test_job_cancellation():
             "job_id": job_id,
             "lead_id": "lead-c1",
             "status": "pending",
-            "idempotency_key": "key-c1"
+            "idempotency_key": "key-c1",
         },
         {
             "id": "item-c2",
             "job_id": job_id,
             "lead_id": "lead-c2",
             "status": "pending",
-            "idempotency_key": "key-c2"
+            "idempotency_key": "key-c2",
         },
         {
             "id": "item-c3",
             "job_id": job_id,
             "lead_id": "lead-c3",
             "status": "completed",
-            "idempotency_key": "key-c3"
-        }
+            "idempotency_key": "key-c3",
+        },
     ]
     supabase.table("generation_job_items").insert(items).execute()
 
@@ -234,14 +247,19 @@ def test_job_cancellation():
     GenerationJobService.cancel_generation_job(job_id, user_id)
 
     # Verify pending items are cancelled, completed remains completed
-    res_c1 = supabase.table("generation_job_items").select("*").eq("id", "item-c1").execute()
+    res_c1 = (
+        supabase.table("generation_job_items").select("*").eq("id", "item-c1").execute()
+    )
     assert res_c1.data[0]["status"] == "cancelled"
 
-    res_c3 = supabase.table("generation_job_items").select("*").eq("id", "item-c3").execute()
+    res_c3 = (
+        supabase.table("generation_job_items").select("*").eq("id", "item-c3").execute()
+    )
     assert res_c3.data[0]["status"] == "completed"
 
 
 # --- 6. Worker Crash Recovery (Resume) ---
+
 
 def test_worker_crash_recovery_resets_processing_items():
     job_id = "job-crash-test"
@@ -251,7 +269,7 @@ def test_worker_crash_recovery_resets_processing_items():
         "id": job_id,
         "user_id": user_id,
         "campaign_id": "camp-crash",
-        "status": "running"
+        "status": "running",
     }
     supabase.table("generation_jobs").insert(job_payload).execute()
 
@@ -261,7 +279,7 @@ def test_worker_crash_recovery_resets_processing_items():
         "job_id": job_id,
         "lead_id": "lead-crash-1",
         "status": "processing",
-        "idempotency_key": "key-crash-1"
+        "idempotency_key": "key-crash-1",
     }
     supabase.table("generation_job_items").insert(item).execute()
 
@@ -269,5 +287,10 @@ def test_worker_crash_recovery_resets_processing_items():
     GenerationJobService.resume_job(job_id, user_id)
 
     # Verify status reset to pending
-    res = supabase.table("generation_job_items").select("*").eq("id", "item-crash-1").execute()
+    res = (
+        supabase.table("generation_job_items")
+        .select("*")
+        .eq("id", "item-crash-1")
+        .execute()
+    )
     assert res.data[0]["status"] == "pending"

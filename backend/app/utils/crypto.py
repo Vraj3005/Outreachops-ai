@@ -1,7 +1,10 @@
 import base64
 import hashlib
+
 from cryptography.fernet import Fernet
+
 from app.config import settings
+
 
 def get_fernet_key() -> str:
     # Use config key or development fallback
@@ -11,13 +14,16 @@ def get_fernet_key() -> str:
     # Format to Fernet URL-safe base64 key
     return base64.urlsafe_b64encode(key_hash).decode("utf-8")
 
+
 _fernet = None
+
 
 def get_fernet_client() -> Fernet:
     global _fernet
     if _fernet is None:
         _fernet = Fernet(get_fernet_key())
     return _fernet
+
 
 def encrypt_val(val: str) -> str:
     """
@@ -27,6 +33,7 @@ def encrypt_val(val: str) -> str:
         return ""
     client = get_fernet_client()
     return client.encrypt(val.encode("utf-8")).decode("utf-8")
+
 
 def decrypt_val(encrypted_val: str) -> str:
     """

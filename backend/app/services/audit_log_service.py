@@ -1,7 +1,7 @@
+import datetime
 import logging
 import uuid
-import datetime
-from typing import Any, Optional
+
 from fastapi import Request
 
 from app.database import supabase
@@ -14,8 +14,8 @@ class AuditLogService:
     def log_event(
         user_id: str,
         action: str,
-        details: Optional[str] = None,
-        request: Optional[Request] = None
+        details: str | None = None,
+        request: Request | None = None,
     ) -> bool:
         """
         Persists security-relevant events to the audit trail database.
@@ -34,7 +34,7 @@ class AuditLogService:
             "action": action,
             "details": details,
             "ip_address": ip_address,
-            "timestamp": datetime.datetime.now(datetime.UTC).isoformat()
+            "timestamp": datetime.datetime.now(datetime.UTC).isoformat(),
         }
 
         try:

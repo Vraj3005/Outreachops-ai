@@ -1,18 +1,19 @@
 import json
-import re
 import logging
+import re
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any
 
+from app.config import settings
 from app.database import supabase
 from app.services.gemini_service import GeminiService
-from app.config import settings
 
 logger = logging.getLogger("outreachops.services.personalization_context")
 gemini_service = GeminiService()
 
 
 # --- Security Sanitizer ---
+
 
 def sanitize_context_value(val: Any) -> str:
     """
@@ -21,17 +22,17 @@ def sanitize_context_value(val: Any) -> str:
     if val is None:
         return ""
     text = str(val).strip()
-    
+
     # Strip potential injection indicators
     injection_patterns = [
         r"(?i)ignore\s+previous\s+instructions",
         r"(?i)system\s+override",
         r"(?i)you\s+must\s+now",
-        r"(?i)<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>"
+        r"(?i)<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>",
     ]
     for pattern in injection_patterns:
         text = re.sub(pattern, "[injection_filtered]", text)
-        
+
     return text
 
 
@@ -40,22 +41,22 @@ class PersonalizationContextService:
     @classmethod
     def compile_context(
         cls,
-        lead: Dict[str, Any],
-        campaign: Optional[Dict[str, Any]] = None,
-        sender_settings: Optional[Dict[str, Any]] = None,
-        sequence_step: Optional[int] = 1,
-        prev_comms: Optional[List[Dict[str, Any]]] = None
-    ) -> Dict[str, Any]:
+        lead: dict[str, Any],
+        campaign: dict[str, Any] | None = None,
+        sender_settings: dict[str, Any] | None = None,
+        sequence_step: int | None = 1,
+        prev_comms: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         """
         Gathers raw data, checks conflicts, sanitizes inputs, scores lead fit alignment,
         extracts locked/excluded properties, and yields a safe structured AI personalization bundle.
         """
         warnings = []
-        
+
         # 1. Parse manual overrides or exclusions stored in personalization_context JSON
         locked_facts = []
         excluded_fields = []
-        
+
         raw_p_context = lead.get("personalization_context")
         if raw_p_context:
             try:
@@ -86,7 +87,9 @@ class PersonalizationContextService:
                 continue
             val = lead.get(field_key)
             if val:
-                factual_context.append(f"{label}: {sanitize_context_value(val)} (Source: Lead Profile)")
+                factual_context.append(
+                    f"{label}: {sanitize_context_value(val)} (Source: Lead Profile)"
+                )
             else:
                 warnings.append(f"Missing context: '{label}' is not defined.")
 
@@ -96,48 +99,72 @@ class PersonalizationContextService:
             if f"custom.{k}" in excluded_fields:
                 continue
             sanitized_v = sanitize_context_value(v)
-            factual_context.append(f"Custom field '{k}': {sanitized_v} (Source: Lead Metadata)")
+            factual_context.append(
+                f"Custom field '{k}': {sanitized_v} (Source: Lead Metadata)"
+            )
 
         # Ingest locked facts
         for lf in locked_facts:
-            factual_context.append(f"{sanitize_context_value(lf)} (Source: Locked Owner Override)")
+            factual_context.append(
+                f"{sanitize_context_value(lf)} (Source: Locked Owner Override)"
+            )
 
         # 3. Retrieve Website Research Snapshots
         research_fresh = False
         research_age_days = 0
         research_summary_text = ""
-        
+
         if supabase:
             try:
-                res = supabase.table("research_snapshots").select("*").eq("lead_id", lead["id"]).eq("research_type", "website").execute()
+                res = (
+                    supabase.table("research_snapshots")
+                    .select("*")
+                    .eq("lead_id", lead["id"])
+                    .eq("research_type", "website")
+                    .execute()
+                )
                 if res.data:
                     snap = res.data[0]
-                    created_dt = datetime.fromisoformat(snap["created_at"].replace("Z", "+00:00"))
-                    age = datetime.utcnow().replace(tzinfo=created_dt.tzinfo) - created_dt
+                    created_dt = datetime.fromisoformat(
+                        snap["created_at"].replace("Z", "+00:00")
+                    )
+                    age = (
+                        datetime.utcnow().replace(tzinfo=created_dt.tzinfo) - created_dt
+                    )
                     research_age_days = age.days
                     if age < timedelta(days=7):
                         research_fresh = True
-                    
+
                     # Read facts
                     summary_data = json.loads(snap["structured_summary"])
                     research_summary_text = summary_data.get("summary", "")
-                    
+
                     # Factual points
                     for fact in summary_data.get("personalization_facts", []):
-                        factual_context.append(f"{sanitize_context_value(fact)} (Source: Website Crawl)")
-                        
+                        factual_context.append(
+                            f"{sanitize_context_value(fact)} (Source: Website Crawl)"
+                        )
+
                     # Inferred observations
                     relevance = summary_data.get("campaign_relevance", "")
                     if relevance:
-                        inferred_context.append(f"[Inferred/Observation] Potential Campaign Hook: {sanitize_context_value(relevance)}")
-                        
+                        inferred_context.append(
+                            f"[Inferred/Observation] Potential Campaign Hook: {sanitize_context_value(relevance)}"
+                        )
+
                     for warn in summary_data.get("uncertainty_warnings", []):
-                        warnings.append(f"Research uncertainty: {sanitize_context_value(warn)}")
+                        warnings.append(
+                            f"Research uncertainty: {sanitize_context_value(warn)}"
+                        )
             except Exception as e:
-                logger.warning(f"Could not retrieve research snapshot for lead {lead['id']}: {e}")
+                logger.warning(
+                    f"Could not retrieve research snapshot for lead {lead['id']}: {e}"
+                )
 
         if not research_summary_text:
-            warnings.append("Missing context: No recent public website research snapshot found.")
+            warnings.append(
+                "Missing context: No recent public website research snapshot found."
+            )
 
         # 4. Field Conflict Diagnostics
         cls._detect_field_conflicts(lead, warnings)
@@ -158,16 +185,23 @@ class PersonalizationContextService:
             "industry": sanitize_context_value(lead.get("industry")),
             "city": sanitize_context_value(lead.get("city")),
             "country": sanitize_context_value(lead.get("country")),
-            "custom": {k: sanitize_context_value(v) for k, v in custom.items() if f"custom.{k}" not in excluded_fields},
+            "custom": {
+                k: sanitize_context_value(v)
+                for k, v in custom.items()
+                if f"custom.{k}" not in excluded_fields
+            },
             "research_summary": sanitize_context_value(research_summary_text),
-            "sequence_step": sequence_step
+            "sequence_step": sequence_step,
         }
 
         # Size limit control: truncate safe_ai_context serialized content if it exceeds 5000 chars
         serialized_test = json.dumps(safe_ai_context)
         if len(serialized_test) > 5000:
             # Truncate research summary to fit
-            safe_ai_context["research_summary"] = safe_ai_context["research_summary"][:1000] + "... [context size cap limit reached]"
+            safe_ai_context["research_summary"] = (
+                safe_ai_context["research_summary"][:1000]
+                + "... [context size cap limit reached]"
+            )
 
         # 8. Compute Explainable Fit Score
         fit_score, score_reasons = cls.calculate_explainable_fit_score(
@@ -175,40 +209,46 @@ class PersonalizationContextService:
         )
 
         # Human-readable paragraph summary
-        completeness_pct = int((len(factual_context) / (len(fields_to_check) + len(custom) + 1)) * 100)
+        completeness_pct = int(
+            (len(factual_context) / (len(fields_to_check) + len(custom) + 1)) * 100
+        )
         completeness_pct = min(100, completeness_pct)
-        
+
         summary_text = (
             f"Lead fit alignment score is evaluated at {fit_score}/100. "
             f"Profile data is {completeness_pct}% complete. "
         )
         if research_fresh:
-            summary_text += f"Website crawling research is fresh ({research_age_days} days old)."
+            summary_text += (
+                f"Website crawling research is fresh ({research_age_days} days old)."
+            )
         else:
-            summary_text += "Website research data is missing or expired (crawling recommended)."
+            summary_text += (
+                "Website research data is missing or expired (crawling recommended)."
+            )
 
         return {
             "personalization_context": {
                 "factual_context": factual_context,
                 "inferred_context": inferred_context,
                 "locked_facts": locked_facts,
-                "excluded_fields": excluded_fields
+                "excluded_fields": excluded_fields,
             },
             "lead_fit_score": fit_score,
             "fit_score_reasons": score_reasons,
             "missing_context_warnings": warnings,
             "safe_ai_context_object": safe_ai_context,
-            "human_readable_summary": summary_text
+            "human_readable_summary": summary_text,
         }
 
     @classmethod
     def calculate_explainable_fit_score(
         cls,
-        lead: Dict[str, Any],
-        campaign: Optional[Dict[str, Any]],
+        lead: dict[str, Any],
+        campaign: dict[str, Any] | None,
         research_fresh: bool,
-        research_summary: str
-    ) -> Tuple[int, List[str]]:
+        research_summary: str,
+    ) -> tuple[int, list[str]]:
         """
         Calculates explainable campaign fit score (0-100) based on transparent criteria.
         AI scoring supplements but does not replace the rules-based metrics.
@@ -221,21 +261,33 @@ class PersonalizationContextService:
             return 100, reasons
 
         # Target vertical verticals vertical Vertical vertical
-        target_industries = [i.lower().strip() for i in campaign.get("target_industries", []) if i]
-        target_locations = [l.lower().strip() for l in campaign.get("target_locations", []) if l]
-        target_roles = [r.lower().strip() for r in campaign.get("target_roles", []) if r]
+        target_industries = [
+            i.lower().strip() for i in campaign.get("target_industries", []) if i
+        ]
+        target_locations = [
+            l.lower().strip() for l in campaign.get("target_locations", []) if l
+        ]
+        target_roles = [
+            r.lower().strip() for r in campaign.get("target_roles", []) if r
+        ]
 
         # 1. Industry Alignment (up to 20 pts)
         lead_ind = str(lead.get("industry") or "").strip().lower()
         if target_industries and lead_ind:
             if lead_ind in target_industries:
                 score += 20
-                reasons.append("+20 pts: Industry matches campaign target vertical criteria.")
+                reasons.append(
+                    "+20 pts: Industry matches campaign target vertical criteria."
+                )
             else:
-                reasons.append(f"+0 pts: Lead vertical '{lead.get('industry')}' does not match campaign vertical targets.")
+                reasons.append(
+                    f"+0 pts: Lead vertical '{lead.get('industry')}' does not match campaign vertical targets."
+                )
         elif not target_industries:
             score += 20
-            reasons.append("+20 pts: No industry vertical limits specified for campaign.")
+            reasons.append(
+                "+20 pts: No industry vertical limits specified for campaign."
+            )
         else:
             reasons.append("+0 pts: Lead industry vertical information is missing.")
 
@@ -247,11 +299,15 @@ class PersonalizationContextService:
             for loc in target_locations:
                 if loc == lead_country or loc == lead_city:
                     score += 20
-                    reasons.append(f"+20 pts: Location match found for region keyword '{loc.capitalize()}'.")
+                    reasons.append(
+                        f"+20 pts: Location match found for region keyword '{loc.capitalize()}'."
+                    )
                     matched_loc = True
                     break
             if not matched_loc:
-                reasons.append("+0 pts: Lead region does not match campaign target boundaries.")
+                reasons.append(
+                    "+0 pts: Lead region does not match campaign target boundaries."
+                )
         else:
             score += 20
             reasons.append("+20 pts: Campaign is configured for global audience scope.")
@@ -263,11 +319,15 @@ class PersonalizationContextService:
             for role in target_roles:
                 if role in lead_title:
                     score += 20
-                    reasons.append(f"+20 pts: Job title '{lead.get('job_title')}' matches role vertical targets.")
+                    reasons.append(
+                        f"+20 pts: Job title '{lead.get('job_title')}' matches role vertical targets."
+                    )
                     matched_role = True
                     break
             if not matched_role:
-                reasons.append(f"+0 pts: Job title '{lead.get('job_title')}' does not match campaign roles.")
+                reasons.append(
+                    f"+0 pts: Job title '{lead.get('job_title')}' does not match campaign roles."
+                )
         elif not target_roles:
             score += 20
             reasons.append("+20 pts: No target audience roles restrictions defined.")
@@ -282,12 +342,16 @@ class PersonalizationContextService:
                 filled_count += 1
         comp_score = int((filled_count / len(checks)) * 15)
         score += comp_score
-        reasons.append(f"+{comp_score} pts: Profile data attributes completeness score.")
+        reasons.append(
+            f"+{comp_score} pts: Profile data attributes completeness score."
+        )
 
         # 5. Website Research Freshness (up to 15 pts)
         if research_fresh:
             score += 15
-            reasons.append("+15 pts: Lead website crawler snapshot is fresh (less than 7 days old).")
+            reasons.append(
+                "+15 pts: Lead website crawler snapshot is fresh (less than 7 days old)."
+            )
         else:
             reasons.append("+0 pts: Website research data is outdated or missing.")
 
@@ -300,25 +364,35 @@ class PersonalizationContextService:
             else:
                 ai_supplement = 5
             score += ai_supplement
-            reasons.append(f"+{ai_supplement} pts: AI relevance vertical supplement (Demo Mode).")
+            reasons.append(
+                f"+{ai_supplement} pts: AI relevance vertical supplement (Demo Mode)."
+            )
         else:
             if research_summary and campaign.get("description"):
                 try:
-                    ai_supplement = cls._query_ai_vertical_relevance(research_summary, campaign["description"])
+                    ai_supplement = cls._query_ai_vertical_relevance(
+                        research_summary, campaign["description"]
+                    )
                     score += ai_supplement
-                    reasons.append(f"+{ai_supplement} pts: AI relevance analysis Vertical evaluation score.")
+                    reasons.append(
+                        f"+{ai_supplement} pts: AI relevance analysis Vertical evaluation score."
+                    )
                 except Exception as e:
                     logger.warning(f"AI scoring failed: {e}")
                     reasons.append("+0 pts: AI vertical relevance calculation error.")
 
         # Cap score at 100
         score = min(100, score)
-        reasons.append("WARNING: The fit score is a campaign profile alignment metric; it must not be interpreted as a conversion probability.")
+        reasons.append(
+            "WARNING: The fit score is a campaign profile alignment metric; it must not be interpreted as a conversion probability."
+        )
 
         return score, reasons
 
     @classmethod
-    def _query_ai_vertical_relevance(cls, website_summary: str, campaign_desc: str) -> int:
+    def _query_ai_vertical_relevance(
+        cls, website_summary: str, campaign_desc: str
+    ) -> int:
         """
         Queries Gemini to obtain a supplemental fit relevance score (0 to 10).
         """
@@ -345,9 +419,7 @@ Output ONLY a JSON object:
         try:
             config = {"response_mime_type": "application/json", "temperature": 0.1}
             response = client.models.generate_content(
-                model=settings.gemini_models[0],
-                contents=prompt,
-                config=config
+                model=settings.gemini_models[0], contents=prompt, config=config
             )
             raw = getattr(response, "text", "").strip()
             data = json.loads(raw)
@@ -357,7 +429,7 @@ Output ONLY a JSON object:
             return 5
 
     @classmethod
-    def _detect_field_conflicts(cls, lead: Dict[str, Any], warnings: List[str]):
+    def _detect_field_conflicts(cls, lead: dict[str, Any], warnings: list[str]):
         """
         Checks for geographic and domain consistency.
         """
@@ -365,12 +437,26 @@ Output ONLY a JSON object:
         website = lead.get("website")
         if email and website:
             email_domain = email.split("@")[-1].lower().replace("www.", "")
-            web_domain = website.lower().replace("https://", "").replace("http://", "").split("/")[0].replace("www.", "")
-            
+            web_domain = (
+                website.lower()
+                .replace("https://", "")
+                .replace("http://", "")
+                .split("/")[0]
+                .replace("www.", "")
+            )
+
             # Skip public mail providers
-            public_providers = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "aol.com"]
+            public_providers = [
+                "gmail.com",
+                "yahoo.com",
+                "outlook.com",
+                "hotmail.com",
+                "aol.com",
+            ]
             if email_domain != web_domain and email_domain not in public_providers:
-                warnings.append(f"Conflict warning: Email domain '@{email_domain}' mismatches website domain '{web_domain}'.")
+                warnings.append(
+                    f"Conflict warning: Email domain '@{email_domain}' mismatches website domain '{web_domain}'."
+                )
 
         city = lead.get("city", "")
         country = lead.get("country", "")
@@ -385,17 +471,25 @@ Output ONLY a JSON object:
                 ("paris", ["usa", "united states", "uk", "united kingdom", "canada"]),
             ]
             for target_city, invalid_countries in conflicts:
-                if target_city in city_l and any(ic in country_l for ic in invalid_countries):
-                    warnings.append(f"Conflict warning: Geographic conflict. City '{city}' is not situated in '{country}'.")
+                if target_city in city_l and any(
+                    ic in country_l for ic in invalid_countries
+                ):
+                    warnings.append(
+                        f"Conflict warning: Geographic conflict. City '{city}' is not situated in '{country}'."
+                    )
 
     @classmethod
-    def _check_prohibited_claims(cls, campaign: Dict[str, Any], facts: List[str], warnings: List[str]):
+    def _check_prohibited_claims(
+        cls, campaign: dict[str, Any], facts: list[str], warnings: list[str]
+    ):
         """
         Flags if any lead context text touches prohibited claims configured in the campaign.
         """
         prohibited = campaign.get("prohibited_claims", []) or []
         combined_facts = "\n".join(facts).lower()
-        
+
         for claim in prohibited:
             if claim.strip() and claim.lower() in combined_facts:
-                warnings.append(f"Prohibited Claim warning: Context matches campaign claims restrictions on '{claim}'.")
+                warnings.append(
+                    f"Prohibited Claim warning: Context matches campaign claims restrictions on '{claim}'."
+                )

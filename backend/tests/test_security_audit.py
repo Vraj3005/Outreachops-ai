@@ -3,11 +3,11 @@ from pydantic import ValidationError
 
 from app.database import SQLiteQueryBuilder, supabase
 from app.schemas.lead import LeadCreate
-from app.services.rate_limit_service import RateLimitService
 from app.services.audit_log_service import AuditLogService
-
+from app.services.rate_limit_service import RateLimitService
 
 # --- 1. SQL Injection Identification & Injection Prevention Tests ---
+
 
 def test_sql_injection_validation():
     import sqlite3
@@ -46,37 +46,60 @@ def test_sql_injection_validation():
 
 # --- 2. Input Validation Schema & Custom Fields Restrictions Tests ---
 
+
 def test_lead_custom_fields_validation():
     # Normal custom fields should pass
     valid_lead = LeadCreate(
         website="http://example.com",
         custom_fields={"industry_segment": "Roofing", "details": {"employees": 15}},
-        user_id="test-owner-id"
+        user_id="test-owner-id",
     )
     assert valid_lead.custom_fields["industry_segment"] == "Roofing"
 
     # Too many custom fields (>50) should fail
     too_many = {f"field_{i}": "val" for i in range(55)}
     with pytest.raises(ValidationError, match="Maximum of 50 custom fields allowed"):
-        LeadCreate(website="http://example.com", custom_fields=too_many, user_id="test-owner-id")
+        LeadCreate(
+            website="http://example.com",
+            custom_fields=too_many,
+            user_id="test-owner-id",
+        )
 
     # Too nested (>2 levels deep) should fail
     nested = {"level1": {"level2": {"level3": "val"}}}
-    with pytest.raises(ValidationError, match="Nesting depth of custom fields cannot exceed 2"):
-        LeadCreate(website="http://example.com", custom_fields=nested, user_id="test-owner-id")
+    with pytest.raises(
+        ValidationError, match="Nesting depth of custom fields cannot exceed 2"
+    ):
+        LeadCreate(
+            website="http://example.com", custom_fields=nested, user_id="test-owner-id"
+        )
 
     # Key length exceeded (>100 characters) should fail
     long_key = {"a" * 105: "val"}
-    with pytest.raises(ValidationError, match="Custom field key length cannot exceed 100 characters"):
-        LeadCreate(website="http://example.com", custom_fields=long_key, user_id="test-owner-id")
+    with pytest.raises(
+        ValidationError, match="Custom field key length cannot exceed 100 characters"
+    ):
+        LeadCreate(
+            website="http://example.com",
+            custom_fields=long_key,
+            user_id="test-owner-id",
+        )
 
     # Value length exceeded (>5000 characters) should fail
     long_val = {"field": "a" * 5005}
-    with pytest.raises(ValidationError, match="Custom field string value length cannot exceed 5000 characters"):
-        LeadCreate(website="http://example.com", custom_fields=long_val, user_id="test-owner-id")
+    with pytest.raises(
+        ValidationError,
+        match="Custom field string value length cannot exceed 5000 characters",
+    ):
+        LeadCreate(
+            website="http://example.com",
+            custom_fields=long_val,
+            user_id="test-owner-id",
+        )
 
 
 # --- 3. Rate Limiting System & Fallback Engine Tests ---
+
 
 def test_rate_limiter_service():
     limiter = RateLimitService()
@@ -101,11 +124,14 @@ def test_rate_limiter_service():
 
 # --- 4. Security Audit Trail Verification Tests ---
 
+
 def test_audit_log_service():
     # Delete previous test records for clean assertions
     if supabase:
         try:
-            supabase.table("security_audit_logs").delete().eq("user_id", "test-owner-id-audit").execute()
+            supabase.table("security_audit_logs").delete().eq(
+                "user_id", "test-owner-id-audit"
+            ).execute()
         except Exception:
             pass
 
@@ -113,13 +139,19 @@ def test_audit_log_service():
     success = AuditLogService.log_event(
         user_id="test-owner-id-audit",
         action="test_action_event",
-        details="test detail parameters"
+        details="test detail parameters",
     )
     assert success is True
 
     # Retrieve from DB to verify structure matches
     if supabase:
-        res = supabase.table("security_audit_logs").select("*").eq("user_id", "test-owner-id-audit").eq("action", "test_action_event").execute()
+        res = (
+            supabase.table("security_audit_logs")
+            .select("*")
+            .eq("user_id", "test-owner-id-audit")
+            .eq("action", "test_action_event")
+            .execute()
+        )
         assert len(res.data) > 0
         assert res.data[0]["details"] == "test detail parameters"
         assert res.data[0]["timestamp"] is not None

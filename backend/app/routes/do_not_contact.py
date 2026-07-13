@@ -5,8 +5,8 @@ from pydantic import BaseModel, Field
 
 from app.database import supabase
 from app.schemas.do_not_contact import DNC
-from app.utils.auth import require_owner
 from app.services.audit_log_service import AuditLogService
+from app.utils.auth import require_owner
 
 logger = logging.getLogger("outreachops.routes.do_not_contact")
 
@@ -75,12 +75,12 @@ async def add_to_dnc_list(
             raise HTTPException(
                 status_code=500, detail="Failed to add email to do-not-contact list"
             )
-        
+
         AuditLogService.log_event(
             user_id=owner["id"],
             action="add_dnc",
             details=f"Added '{email_clean}' to DNC list (Reason: {payload.reason or 'Manual exclusion'})",
-            request=request
+            request=request,
         )
         return DNC(**res.data[0])
     except Exception as e:

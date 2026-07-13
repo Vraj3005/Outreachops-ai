@@ -1,7 +1,6 @@
 import base64
 import logging
 import os
-import pickle
 import re
 from datetime import datetime
 from email.mime.multipart import MIMEMultipart
@@ -38,61 +37,81 @@ class GmailService:
         self.scopes = ["https://www.googleapis.com/auth/gmail.send"]
 
     def _get_db_credentials(self, user_id: str):
-        from app.utils.crypto import decrypt_val
         import json
+
         from google.oauth2.credentials import Credentials
-        
+
+        from app.utils.crypto import decrypt_val
+
         try:
-            res = supabase.table("integration_connections").select("*").eq("user_id", user_id).eq("provider", "gmail").execute()
+            res = (
+                supabase.table("integration_connections")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("provider", "gmail")
+                .execute()
+            )
             if not res.data:
                 return None
             conn = res.data[0]
             if conn.get("connection_status") != "connected":
                 return None
-            
+
             creds_str = decrypt_val(conn.get("encrypted_credentials"))
             if not creds_str:
                 return None
-            
+
             creds_info = json.loads(creds_str)
             return Credentials(
                 token=creds_info.get("token"),
                 refresh_token=creds_info.get("refresh_token"),
-                token_uri=creds_info.get("token_uri", "https://oauth2.googleapis.com/token"),
+                token_uri=creds_info.get(
+                    "token_uri", "https://oauth2.googleapis.com/token"
+                ),
                 client_id=creds_info.get("client_id"),
                 client_secret=creds_info.get("client_secret"),
-                scopes=self.scopes
+                scopes=self.scopes,
             )
         except Exception as e:
             logger.error(f"Error loading credentials from database: {e}")
             return None
 
     def _save_db_credentials(self, user_id: str, creds):
-        from app.utils.crypto import encrypt_val
         import json
-        
+
+        from app.utils.crypto import encrypt_val
+
         creds_info = {
             "token": creds.token,
             "refresh_token": creds.refresh_token,
             "token_uri": creds.token_uri,
             "client_id": creds.client_id,
-            "client_secret": creds.client_secret
+            "client_secret": creds.client_secret,
         }
         encrypted = encrypt_val(json.dumps(creds_info))
-        
+
         payload = {
             "user_id": user_id,
             "provider": "gmail",
             "connection_status": "connected",
             "encrypted_credentials": encrypted,
-            "updated_at": datetime.utcnow().isoformat()
+            "updated_at": datetime.utcnow().isoformat(),
         }
-        
-        res = supabase.table("integration_connections").select("id").eq("user_id", user_id).eq("provider", "gmail").execute()
+
+        res = (
+            supabase.table("integration_connections")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("provider", "gmail")
+            .execute()
+        )
         if res.data:
-            supabase.table("integration_connections").update(payload).eq("id", res.data[0]["id"]).execute()
+            supabase.table("integration_connections").update(payload).eq(
+                "id", res.data[0]["id"]
+            ).execute()
         else:
             import uuid
+
             payload["id"] = str(uuid.uuid4())
             supabase.table("integration_connections").insert(payload).execute()
 
@@ -102,7 +121,9 @@ class GmailService:
         """
         if settings.DEMO_MODE:
             return {
-                "status": "connected" if settings.DEMO_SENDING_ENABLED else "disconnected",
+                "status": (
+                    "connected" if settings.DEMO_SENDING_ENABLED else "disconnected"
+                ),
                 "details": "Demo Mode active. Simulated Gmail connected status.",
             }
 
@@ -133,7 +154,10 @@ class GmailService:
                     "details": f"Failed to refresh cached tokens: {e}",
                 }
 
-        return {"status": "disconnected", "details": "Gmail OAuth credentials have expired."}
+        return {
+            "status": "disconnected",
+            "details": "Gmail OAuth credentials have expired.",
+        }
 
     def run_oauth_flow(self, user_id: str) -> dict[str, Any]:
         """
@@ -174,7 +198,9 @@ class GmailService:
         Revokes Gmail integration credentials by deleting database records.
         """
         try:
-            supabase.table("integration_connections").delete().eq("user_id", user_id).eq("provider", "gmail").execute()
+            supabase.table("integration_connections").delete().eq(
+                "user_id", user_id
+            ).eq("provider", "gmail").execute()
             return {"status": "success", "message": "Connection revoked successfully."}
         except Exception as e:
             logger.error(f"Failed to revoke Gmail connection: {e}")

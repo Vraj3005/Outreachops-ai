@@ -1,5 +1,6 @@
 import os
-from fastapi import Depends, HTTPException, status, Request
+
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.config import settings
@@ -21,6 +22,7 @@ async def require_owner(
 
     # Failed attempts rate limiting configuration
     from app.services.rate_limit_service import RateLimitService
+
     limiter = RateLimitService()
     client_ip = request.client.host if (request and request.client) else "unknown-ip"
     limit_key = f"auth_fail:{client_ip}"
@@ -32,7 +34,12 @@ async def require_owner(
     is_blocked = False
     if os.getenv("ENV") != "test" and supabase:
         try:
-            res = supabase.table("rate_limits").select("value").eq("key", limit_key).execute()
+            res = (
+                supabase.table("rate_limits")
+                .select("value")
+                .eq("key", limit_key)
+                .execute()
+            )
             if res.data and int(res.data[0]["value"]) >= 10:
                 is_blocked = True
         except Exception:
@@ -53,24 +60,32 @@ async def require_owner(
     # 1. Demo Mode Check
     if settings.DEMO_MODE:
         if token == "mock-invalid-token":
-            record_failure_and_raise(HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid, missing or expired authentication token",
-            ))
+            record_failure_and_raise(
+                HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid, missing or expired authentication token",
+                )
+            )
         elif token == "mock-expired-token":
-            record_failure_and_raise(HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
-            ))
+            record_failure_and_raise(
+                HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
+                )
+            )
         elif token == "mock-non-owner-token":
-            record_failure_and_raise(HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Unauthorized: Access is restricted to the owner only",
-            ))
+            record_failure_and_raise(
+                HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Unauthorized: Access is restricted to the owner only",
+                )
+            )
         elif token not in ("mock-owner-token", "mock-valid-token"):
-            record_failure_and_raise(HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid, missing or expired authentication token",
-            ))
+            record_failure_and_raise(
+                HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid, missing or expired authentication token",
+                )
+            )
 
         # Valid Mock token bypass in Demo mode
         return {"id": settings.OWNER_USER_ID, "email": settings.OWNER_EMAIL}
@@ -86,20 +101,24 @@ async def require_owner(
     try:
         response = supabase.auth.get_user(token)
         if not response or not response.user:
-            record_failure_and_raise(HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid, missing or expired authentication token",
-            ))
+            record_failure_and_raise(
+                HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid, missing or expired authentication token",
+                )
+            )
 
         user = response.user
         email = user.email
         user_id = user.id
 
         if not email or email.lower() != settings.OWNER_EMAIL.lower():
-            record_failure_and_raise(HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Unauthorized: Access is restricted to the owner only",
-            ))
+            record_failure_and_raise(
+                HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Unauthorized: Access is restricted to the owner only",
+                )
+            )
 
         return {"id": user_id, "email": email}
     except Exception as e:
@@ -107,10 +126,14 @@ async def require_owner(
             raise e
         err_msg = str(e).lower()
         if "jwt expired" in err_msg or "expired" in err_msg:
-            record_failure_and_raise(HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
-            ))
-        record_failure_and_raise(HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Authentication failed: {str(e)}",
-        ))
+            record_failure_and_raise(
+                HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
+                )
+            )
+        record_failure_and_raise(
+            HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Authentication failed: {str(e)}",
+            )
+        )

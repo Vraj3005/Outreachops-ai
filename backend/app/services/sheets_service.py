@@ -27,8 +27,9 @@ class SheetsService:
 
     def _get_client(self, user_id: str) -> gspread.Client:
         """Initializes authorized gspread client using Service Account JSON."""
-        from app.utils.crypto import decrypt_val
         import json
+
+        from app.utils.crypto import decrypt_val
 
         scopes = [
             "https://www.googleapis.com/auth/spreadsheets",
@@ -37,15 +38,25 @@ class SheetsService:
 
         # Try database credentials first
         try:
-            res = supabase.table("integration_connections").select("*").eq("user_id", user_id).eq("provider", "google_sheets").execute()
+            res = (
+                supabase.table("integration_connections")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("provider", "google_sheets")
+                .execute()
+            )
             if res.data and res.data[0].get("connection_status") == "connected":
                 sa_str = decrypt_val(res.data[0].get("encrypted_credentials"))
                 if sa_str:
                     creds_info = json.loads(sa_str)
-                    creds = Credentials.from_service_account_info(creds_info, scopes=scopes)
+                    creds = Credentials.from_service_account_info(
+                        creds_info, scopes=scopes
+                    )
                     return gspread.authorize(creds)
         except Exception as e:
-            logger.warning(f"Failed to load Sheets service account from DB: {e}. Checking local file...")
+            logger.warning(
+                f"Failed to load Sheets service account from DB: {e}. Checking local file..."
+            )
 
         if not self.creds_path or not os.path.exists(self.creds_path):
             raise MissingCredentialsError(

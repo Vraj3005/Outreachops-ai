@@ -2,37 +2,57 @@ import csv
 import io
 import json
 import logging
-from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, File, HTTPException, Path, UploadFile, Query, status
+from typing import Any
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Path,
+    Query,
+    status,
+)
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from app.crud.leads import get_lead, get_leads
 from app.database import supabase
-from app.crud.leads import get_leads
-from app.schemas.lead import Lead, LeadBase, LeadCreate, LeadUpdate
-from app.utils.auth import require_owner
+from app.schemas.lead import Lead, LeadBase, LeadUpdate
 from app.services.lead_quality_service import LeadQualityService
+from app.utils.auth import require_owner
 
 logger = logging.getLogger("outreachops.routes.leads")
 
 router = APIRouter(prefix="/leads", tags=["leads"])
 quality_service = LeadQualityService()
 
+
 class BulkActionRequest(BaseModel):
-    lead_ids: List[str] = Field(..., description="List of target lead UUIDs")
-    action: str = Field(..., description="Action to perform: add_tags, remove_tags, enroll_campaign, disenroll_campaign, revalidate, research, archive")
-    params: Optional[Dict[str, Any]] = Field(default_factory=dict, description="Additional parameters (e.g. tag list, campaign_id)")
+    lead_ids: list[str] = Field(..., description="List of target lead UUIDs")
+    action: str = Field(
+        ...,
+        description="Action to perform: add_tags, remove_tags, enroll_campaign, disenroll_campaign, revalidate, research, archive",
+    )
+    params: dict[str, Any] | None = Field(
+        default_factory=dict,
+        description="Additional parameters (e.g. tag list, campaign_id)",
+    )
+
 
 @router.get("", response_model=list[Lead])
 async def read_leads(
     limit: int = 100,
     offset: int = 0,
-    search: Optional[str] = Query(None, description="Search term for company name, website, or email"),
-    lead_status: Optional[str] = Query(None, description="Filter by lead status"),
-    industry: Optional[str] = Query(None, description="Filter by industry"),
-    country: Optional[str] = Query(None, description="Filter by country"),
-    email_validation_status: Optional[str] = Query(None, description="Filter by validation status"),
-    owner: dict = Depends(require_owner)
+    search: str | None = Query(
+        None, description="Search term for company name, website, or email"
+    ),
+    lead_status: str | None = Query(None, description="Filter by lead status"),
+    industry: str | None = Query(None, description="Filter by industry"),
+    country: str | None = Query(None, description="Filter by country"),
+    email_validation_status: str | None = Query(
+        None, description="Filter by validation status"
+    ),
+    owner: dict = Depends(require_owner),
 ):
     """
     Get all leads with advanced filtering, searching, and pagination.
@@ -40,7 +60,7 @@ async def read_leads(
     try:
         # Route query through get_leads for SQLite/Supabase/mocker compatibility
         data = get_leads(user_id=owner["id"], limit=1000) or []
-        
+
         # Apply filters
         if lead_status:
             data = [l for l in data if l.get("lead_status") == lead_status]
@@ -49,16 +69,21 @@ async def read_leads(
         if country:
             data = [l for l in data if l.get("country") == country]
         if email_validation_status:
-            data = [l for l in data if l.get("email_validation_status") == email_validation_status]
-            
+            data = [
+                l
+                for l in data
+                if l.get("email_validation_status") == email_validation_status
+            ]
+
         # Local search mapping filter if search specified
         if search:
             s_clean = search.strip().lower()
             data = [
-                l for l in data if 
-                s_clean in (l.get("company_name") or "").lower() or
-                s_clean in (l.get("website") or "").lower() or
-                s_clean in (l.get("contact_email") or "").lower()
+                l
+                for l in data
+                if s_clean in (l.get("company_name") or "").lower()
+                or s_clean in (l.get("website") or "").lower()
+                or s_clean in (l.get("contact_email") or "").lower()
             ]
 
         # Apply offset and limit pagination manually on the filtered results
@@ -69,14 +94,17 @@ async def read_leads(
         logger.error(f"Error reading leads list: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error reading leads records"
+            detail="Error reading leads records",
         )
+
 
 @router.post("", response_model=Lead, status_code=status.HTTP_201_CREATED)
 async def add_lead(
     lead_in: LeadBase,
-    duplicate_strategy: str = Query("skip", description="Duplicate strategy: skip, merge, overwrite, keep_both"),
-    owner: dict = Depends(require_owner)
+    duplicate_strategy: str = Query(
+        "skip", description="Duplicate strategy: skip, merge, overwrite, keep_both"
+    ),
+    owner: dict = Depends(require_owner),
 ):
     """
     Creates a new lead using normalizations, verification checks, duplicate strategies, and fit scoring calculations.
@@ -93,14 +121,24 @@ async def add_lead(
     if duplicate_strategy != "keep_both":
         existing = quality_service.find_existing_duplicate(normalized, owner["id"])
         if existing:
-            action, resolved_data = quality_service.resolve_duplicate_conflict(normalized, existing, duplicate_strategy)
+            action, resolved_data = quality_service.resolve_duplicate_conflict(
+                normalized, existing, duplicate_strategy
+            )
             if action == "skipped":
                 return existing
-            
+
             # Persist update
-            res = supabase.table("leads").update(resolved_data).eq("id", existing["id"]).execute()
+            res = (
+                supabase.table("leads")
+                .update(resolved_data)
+                .eq("id", existing["id"])
+                .execute()
+            )
             if not res.data:
-                raise HTTPException(status_code=500, detail="Failed to resolve duplicate conflict update")
+                raise HTTPException(
+                    status_code=500,
+                    detail="Failed to resolve duplicate conflict update",
+                )
             return res.data[0]
 
     # 3. Email Verification
@@ -113,16 +151,25 @@ async def add_lead(
 
     # 4. Fit Scoring (Default mock criteria)
     campaign_criteria = {
-        "target_industries": ["construction", "hvac", "roofing", "masonry", "manufacturing"],
+        "target_industries": [
+            "construction",
+            "hvac",
+            "roofing",
+            "masonry",
+            "manufacturing",
+        ],
         "target_locations": ["usa", "canada"],
-        "target_roles": ["sales", "owner", "partner", "founder", "manager"]
+        "target_roles": ["sales", "owner", "partner", "founder", "manager"],
     }
-    from app.services.personalization_context_service import PersonalizationContextService
+    from app.services.personalization_context_service import (
+        PersonalizationContextService,
+    )
+
     score, reasons = PersonalizationContextService.calculate_explainable_fit_score(
         lead=normalized,
         campaign=campaign_criteria,
         research_fresh=False,
-        research_summary=""
+        research_summary="",
     )
     normalized["fit_score"] = score
     normalized["fit_score_reasons"] = reasons
@@ -152,10 +199,16 @@ async def modify_lead(
     if not lead_in:
         raise HTTPException(status_code=400, detail="Request payload cannot be empty")
 
-    existing = supabase.table("leads").select("*").eq("id", id).eq("user_id", owner["id"]).execute()
+    existing = (
+        supabase.table("leads")
+        .select("*")
+        .eq("id", id)
+        .eq("user_id", owner["id"])
+        .execute()
+    )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Lead not found")
-    
+
     current_record = existing.data[0]
 
     # Overlay changes
@@ -167,17 +220,27 @@ async def modify_lead(
 
     # Re-verify and re-score if profile details changed
     email = normalized.get("contact_email")
-    if email and (update_data.get("contact_email") or not current_record.get("email_validation_status")):
+    if email and (
+        update_data.get("contact_email")
+        or not current_record.get("email_validation_status")
+    ):
         verification = quality_service.verify_email(email)
         normalized["email_validation_status"] = verification["status"]
-        
+
     # Fetch campaign enrollment
     campaign_data = None
     try:
-        enroll_res = supabase.table("campaign_leads").select("campaign_id").eq("lead_id", id).execute()
+        enroll_res = (
+            supabase.table("campaign_leads")
+            .select("campaign_id")
+            .eq("lead_id", id)
+            .execute()
+        )
         if enroll_res.data:
             camp_id = enroll_res.data[0]["campaign_id"]
-            camp_res = supabase.table("campaigns").select("*").eq("id", camp_id).execute()
+            camp_res = (
+                supabase.table("campaigns").select("*").eq("id", camp_id).execute()
+            )
             if camp_res.data:
                 campaign_data = camp_res.data[0]
     except Exception:
@@ -185,20 +248,35 @@ async def modify_lead(
 
     if not campaign_data:
         campaign_data = {
-            "target_industries": ["construction", "hvac", "roofing", "masonry", "manufacturing"],
+            "target_industries": [
+                "construction",
+                "hvac",
+                "roofing",
+                "masonry",
+                "manufacturing",
+            ],
             "target_locations": ["usa", "canada"],
-            "target_roles": ["sales", "owner", "partner", "founder", "manager"]
+            "target_roles": ["sales", "owner", "partner", "founder", "manager"],
         }
 
     # Fetch research freshness
     research_fresh = False
     research_summary = ""
     try:
-        r_res = supabase.table("research_snapshots").select("*").eq("lead_id", id).eq("research_type", "website").execute()
+        r_res = (
+            supabase.table("research_snapshots")
+            .select("*")
+            .eq("lead_id", id)
+            .eq("research_type", "website")
+            .execute()
+        )
         if r_res.data:
             from datetime import datetime, timedelta
+
             snap = r_res.data[0]
-            created_dt = datetime.fromisoformat(snap["created_at"].replace("Z", "+00:00"))
+            created_dt = datetime.fromisoformat(
+                snap["created_at"].replace("Z", "+00:00")
+            )
             age = datetime.utcnow().replace(tzinfo=created_dt.tzinfo) - created_dt
             if age < timedelta(days=7):
                 research_fresh = True
@@ -206,12 +284,15 @@ async def modify_lead(
     except Exception:
         pass
 
-    from app.services.personalization_context_service import PersonalizationContextService
+    from app.services.personalization_context_service import (
+        PersonalizationContextService,
+    )
+
     score, reasons = PersonalizationContextService.calculate_explainable_fit_score(
         lead=normalized,
         campaign=campaign_data,
         research_fresh=research_fresh,
-        research_summary=research_summary
+        research_summary=research_summary,
     )
     normalized["fit_score"] = score
     normalized["fit_score_reasons"] = reasons
@@ -230,6 +311,7 @@ async def modify_lead(
         logger.error(f"Error updating lead {id}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
+
 @router.delete("/{id}", status_code=status.HTTP_200_OK)
 async def remove_lead(
     id: str = Path(..., description="Lead UUID"),
@@ -241,7 +323,13 @@ async def remove_lead(
     if not supabase:
         raise HTTPException(status_code=500, detail="Database client offline")
 
-    existing = supabase.table("leads").select("id").eq("id", id).eq("user_id", owner["id"]).execute()
+    existing = (
+        supabase.table("leads")
+        .select("id")
+        .eq("id", id)
+        .eq("user_id", owner["id"])
+        .execute()
+    )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Lead not found")
 
@@ -252,13 +340,17 @@ async def remove_lead(
         logger.error(f"Error deleting lead {id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete lead")
 
+
 class ExportLeadsRequest(BaseModel):
-    lead_ids: Optional[List[str]] = Field(default=None, description="Optional list of lead IDs to export. If null/empty, exports all leads.")
+    lead_ids: list[str] | None = Field(
+        default=None,
+        description="Optional list of lead IDs to export. If null/empty, exports all leads.",
+    )
+
 
 @router.post("/export")
 async def export_leads(
-    payload: Optional[ExportLeadsRequest] = None,
-    owner: dict = Depends(require_owner)
+    payload: ExportLeadsRequest | None = None, owner: dict = Depends(require_owner)
 ):
     """
     Exports leads as a downloadable CSV stream.
@@ -281,7 +373,7 @@ async def export_leads(
             if val is None:
                 return ""
             val_str = str(val)
-            if val_str and val_str[0] in ['=', '+', '-', '@']:
+            if val_str and val_str[0] in ["=", "+", "-", "@"]:
                 return "'" + val_str
             return val
 
@@ -290,12 +382,27 @@ async def export_leads(
         writer = csv.writer(output)
 
         headers = [
-            "id", "first_name", "last_name", "full_name", "company_name", 
-            "job_title", "website", "industry", "country", "city", 
-            "contact_email", "phone", "lead_status", "tags", 
-            "custom_fields", "research_status", "research_summary", 
-            "personalization_context", "fit_score", "email_validation_status", 
-            "created_at"
+            "id",
+            "first_name",
+            "last_name",
+            "full_name",
+            "company_name",
+            "job_title",
+            "website",
+            "industry",
+            "country",
+            "city",
+            "contact_email",
+            "phone",
+            "lead_status",
+            "tags",
+            "custom_fields",
+            "research_status",
+            "research_summary",
+            "personalization_context",
+            "fit_score",
+            "email_validation_status",
+            "created_at",
         ]
         writer.writerow(headers)
 
@@ -323,7 +430,7 @@ async def export_leads(
                 l.get("personalization_context"),
                 l.get("fit_score"),
                 l.get("email_validation_status"),
-                l.get("created_at")
+                l.get("created_at"),
             ]
             escaped_row = [escape_csv_val(cell) for cell in row_data]
             writer.writerow(escaped_row)
@@ -332,14 +439,17 @@ async def export_leads(
         return StreamingResponse(
             io.BytesIO(output.getvalue().encode("utf-8")),
             media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=leads_export.csv"}
+            headers={"Content-Disposition": "attachment; filename=leads_export.csv"},
         )
     except Exception as e:
         logger.error(f"Failed to export leads: {e}")
         raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
 
+
 @router.post("/bulk-action", status_code=status.HTTP_200_OK)
-async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(require_owner)):
+async def perform_bulk_action(
+    payload: BulkActionRequest, owner: dict = Depends(require_owner)
+):
     """
     Applies bulk actions across a selection collection list of leads.
     """
@@ -354,50 +464,92 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
 
     # Validate that all lead IDs belong to the authenticated owner
     try:
-        valid_res = supabase.table("leads").select("id").eq("user_id", owner["id"]).in_("id", lead_ids).execute()
+        valid_res = (
+            supabase.table("leads")
+            .select("id")
+            .eq("user_id", owner["id"])
+            .in_("id", lead_ids)
+            .execute()
+        )
         valid_lead_ids = [row["id"] for row in (valid_res.data or [])]
     except Exception as e:
         logger.error(f"Failed to validate lead ownership in bulk action: {e}")
-        raise HTTPException(status_code=500, detail="Database access error during validation")
+        raise HTTPException(
+            status_code=500, detail="Database access error during validation"
+        )
 
     if not valid_lead_ids:
-        raise HTTPException(status_code=404, detail="No authorized leads found to process")
+        raise HTTPException(
+            status_code=404, detail="No authorized leads found to process"
+        )
 
     # If campaign_id is provided, validate it belongs to the owner
     campaign_id = params.get("campaign_id")
     if campaign_id:
         try:
-            camp_check = supabase.table("campaigns").select("id").eq("id", campaign_id).eq("user_id", owner["id"]).execute()
+            camp_check = (
+                supabase.table("campaigns")
+                .select("id")
+                .eq("id", campaign_id)
+                .eq("user_id", owner["id"])
+                .execute()
+            )
             if not camp_check.data:
-                raise HTTPException(status_code=403, detail="Unauthorized campaign access")
+                raise HTTPException(
+                    status_code=403, detail="Unauthorized campaign access"
+                )
         except HTTPException:
             raise
         except Exception as e:
             logger.error(f"Failed to validate campaign ownership in bulk action: {e}")
-            raise HTTPException(status_code=500, detail="Database access error during validation")
+            raise HTTPException(
+                status_code=500, detail="Database access error during validation"
+            )
 
     modified_count = 0
 
     try:
         if action == "add_tags":
-            tags_to_add = [t.strip().lower() for t in params.get("tags", []) if str(t).strip()]
+            tags_to_add = [
+                t.strip().lower() for t in params.get("tags", []) if str(t).strip()
+            ]
             if tags_to_add:
                 # Fetch target leads
-                res = supabase.table("leads").select("id", "tags").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
+                res = (
+                    supabase.table("leads")
+                    .select("id", "tags")
+                    .eq("user_id", owner["id"])
+                    .in_("id", valid_lead_ids)
+                    .execute()
+                )
                 for item in res.data:
                     current_tags = item.get("tags") or []
                     updated_tags = sorted(list(set(current_tags + tags_to_add)))
-                    supabase.table("leads").update({"tags": updated_tags}).eq("id", item["id"]).execute()
+                    supabase.table("leads").update({"tags": updated_tags}).eq(
+                        "id", item["id"]
+                    ).execute()
                     modified_count += 1
 
         elif action == "remove_tags":
-            tags_to_remove = [t.strip().lower() for t in params.get("tags", []) if str(t).strip()]
+            tags_to_remove = [
+                t.strip().lower() for t in params.get("tags", []) if str(t).strip()
+            ]
             if tags_to_remove:
-                res = supabase.table("leads").select("id", "tags").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
+                res = (
+                    supabase.table("leads")
+                    .select("id", "tags")
+                    .eq("user_id", owner["id"])
+                    .in_("id", valid_lead_ids)
+                    .execute()
+                )
                 for item in res.data:
                     current_tags = item.get("tags") or []
-                    updated_tags = sorted([t for t in current_tags if t not in tags_to_remove])
-                    supabase.table("leads").update({"tags": updated_tags}).eq("id", item["id"]).execute()
+                    updated_tags = sorted(
+                        [t for t in current_tags if t not in tags_to_remove]
+                    )
+                    supabase.table("leads").update({"tags": updated_tags}).eq(
+                        "id", item["id"]
+                    ).execute()
                     modified_count += 1
 
         elif action == "enroll_campaign":
@@ -408,7 +560,7 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
                         "campaign_id": campaign_id,
                         "lead_id": lid,
                         "status": "enrolled",
-                        "current_sequence_step": 1
+                        "current_sequence_step": 1,
                     }
                     supabase.table("campaign_leads").insert(enroll_payload).execute()
                     modified_count += 1
@@ -417,21 +569,36 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
                     pass
 
         elif action == "disenroll_campaign":
-            res = supabase.table("campaign_leads").delete().eq("campaign_id", campaign_id).in_("lead_id", valid_lead_ids).execute()
+            res = (
+                supabase.table("campaign_leads")
+                .delete()
+                .eq("campaign_id", campaign_id)
+                .in_("lead_id", valid_lead_ids)
+                .execute()
+            )
             modified_count = len(res.data or [])
 
         elif action == "revalidate":
-            res = supabase.table("leads").select("id", "contact_email").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
+            res = (
+                supabase.table("leads")
+                .select("id", "contact_email")
+                .eq("user_id", owner["id"])
+                .in_("id", valid_lead_ids)
+                .execute()
+            )
             for item in res.data:
                 email = item.get("contact_email")
                 if email:
                     verification = quality_service.verify_email(email)
-                    supabase.table("leads").update({"email_validation_status": verification["status"]}).eq("id", item["id"]).execute()
+                    supabase.table("leads").update(
+                        {"email_validation_status": verification["status"]}
+                    ).eq("id", item["id"]).execute()
                     modified_count += 1
 
         elif action == "research":
             # Performs real website crawler research, updating status
             from app.services.rate_limit_service import RateLimitService
+
             limiter = RateLimitService()
             limit_key = f"rate_limit:leads_research:{owner['id']}"
             if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
@@ -440,34 +607,51 @@ async def perform_bulk_action(payload: BulkActionRequest, owner: dict = Depends(
                     detail="Too many research requests. Please try again later.",
                 )
 
-            res = supabase.table("leads").select("id", "company_name", "website").eq("user_id", owner["id"]).in_("id", valid_lead_ids).execute()
+            res = (
+                supabase.table("leads")
+                .select("id", "company_name", "website")
+                .eq("user_id", owner["id"])
+                .in_("id", valid_lead_ids)
+                .execute()
+            )
             from app.services.website_research_service import WebsiteResearchService
+
             for item in res.data:
                 website = item.get("website")
                 if website:
                     try:
-                        research_res = WebsiteResearchService.research_lead_website(item["id"], website, refresh=True)
-                        supabase.table("leads").update({
-                            "research_status": "completed",
-                            "research_summary": research_res["summary"],
-                            "personalization_context": json.dumps(research_res.get("personalization_facts") or [])
-                        }).eq("id", item["id"]).execute()
+                        research_res = WebsiteResearchService.research_lead_website(
+                            item["id"], website, refresh=True
+                        )
+                        supabase.table("leads").update(
+                            {
+                                "research_status": "completed",
+                                "research_summary": research_res["summary"],
+                                "personalization_context": json.dumps(
+                                    research_res.get("personalization_facts") or []
+                                ),
+                            }
+                        ).eq("id", item["id"]).execute()
                     except Exception as e:
                         logger.error(f"Bulk research failed for lead {item['id']}: {e}")
-                        supabase.table("leads").update({
-                            "research_status": "failed",
-                            "research_summary": f"Research failed: {str(e)}"
-                        }).eq("id", item["id"]).execute()
+                        supabase.table("leads").update(
+                            {
+                                "research_status": "failed",
+                                "research_summary": f"Research failed: {str(e)}",
+                            }
+                        ).eq("id", item["id"]).execute()
                 modified_count += 1
 
         elif action == "archive":
             for lid in valid_lead_ids:
-                supabase.table("leads").update({"lead_status": "Archived"}).eq("id", lid).execute()
+                supabase.table("leads").update({"lead_status": "Archived"}).eq(
+                    "id", lid
+                ).execute()
                 modified_count += 1
 
         return {
             "modified_count": modified_count,
-            "message": f"Successfully performed bulk action '{action}' across {modified_count} leads."
+            "message": f"Successfully performed bulk action '{action}' across {modified_count} leads.",
         }
 
     except Exception as e:
@@ -483,6 +667,7 @@ async def research_single_lead(
     Triggers public website research for a single lead.
     """
     from app.services.rate_limit_service import RateLimitService
+
     limiter = RateLimitService()
     limit_key = f"rate_limit:leads_research:{owner['id']}"
     if limiter.is_rate_limited(limit_key, max_requests=10, window_seconds=60):
@@ -500,32 +685,42 @@ async def research_single_lead(
         raise HTTPException(status_code=400, detail="Lead website is missing")
 
     from app.services.website_research_service import WebsiteResearchService
+
     try:
-        supabase.table("leads").update({"research_status": "searching"}).eq("id", id).execute()
-        
-        research_res = WebsiteResearchService.research_lead_website(id, website, refresh=refresh)
-        
+        supabase.table("leads").update({"research_status": "searching"}).eq(
+            "id", id
+        ).execute()
+
+        research_res = WebsiteResearchService.research_lead_website(
+            id, website, refresh=refresh
+        )
+
         # Save structured summary to lead
-        supabase.table("leads").update({
-            "research_status": "completed",
-            "research_summary": research_res["summary"],
-            "personalization_context": json.dumps(research_res.get("personalization_facts") or [])
-        }).eq("id", id).execute()
-        
+        supabase.table("leads").update(
+            {
+                "research_status": "completed",
+                "research_summary": research_res["summary"],
+                "personalization_context": json.dumps(
+                    research_res.get("personalization_facts") or []
+                ),
+            }
+        ).eq("id", id).execute()
+
         return research_res
     except Exception as e:
         logger.error(f"Research failed for lead {id}: {e}")
-        supabase.table("leads").update({
-            "research_status": "failed",
-            "research_summary": f"Research failed: {str(e)}"
-        }).eq("id", id).execute()
+        supabase.table("leads").update(
+            {
+                "research_status": "failed",
+                "research_summary": f"Research failed: {str(e)}",
+            }
+        ).eq("id", id).execute()
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{id}/personalization-context")
 async def get_lead_personalization_context(
-    id: str = Path(..., description="Lead UUID"),
-    owner: dict = Depends(require_owner)
+    id: str = Path(..., description="Lead UUID"), owner: dict = Depends(require_owner)
 ):
     """
     Retrieves the compiled structured personalization context, warnings,
@@ -535,19 +730,32 @@ async def get_lead_personalization_context(
         raise HTTPException(status_code=500, detail="Database client offline")
 
     # Fetch lead
-    existing = supabase.table("leads").select("*").eq("id", id).eq("user_id", owner["id"]).execute()
+    existing = (
+        supabase.table("leads")
+        .select("*")
+        .eq("id", id)
+        .eq("user_id", owner["id"])
+        .execute()
+    )
     if not existing.data:
         raise HTTPException(status_code=404, detail="Lead not found")
-        
+
     lead_data = existing.data[0]
 
     # Find campaign if lead enrolled
     campaign_data = None
     try:
-        enroll_res = supabase.table("campaign_leads").select("campaign_id").eq("lead_id", id).execute()
+        enroll_res = (
+            supabase.table("campaign_leads")
+            .select("campaign_id")
+            .eq("lead_id", id)
+            .execute()
+        )
         if enroll_res.data:
             camp_id = enroll_res.data[0]["campaign_id"]
-            camp_res = supabase.table("campaigns").select("*").eq("id", camp_id).execute()
+            camp_res = (
+                supabase.table("campaigns").select("*").eq("id", camp_id).execute()
+            )
             if camp_res.data:
                 campaign_data = camp_res.data[0]
     except Exception:
@@ -556,20 +764,24 @@ async def get_lead_personalization_context(
     # Fetch sender settings (owner settings) if available
     sender_settings = None
     try:
-        set_res = supabase.table("owner_settings").select("*").eq("user_id", owner["id"]).execute()
+        set_res = (
+            supabase.table("owner_settings")
+            .select("*")
+            .eq("user_id", owner["id"])
+            .execute()
+        )
         if set_res.data:
             sender_settings = set_res.data[0]
     except Exception:
         pass
 
-    from app.services.personalization_context_service import PersonalizationContextService
-    
+    from app.services.personalization_context_service import (
+        PersonalizationContextService,
+    )
+
     # Compile
     context_data = PersonalizationContextService.compile_context(
-        lead=lead_data,
-        campaign=campaign_data,
-        sender_settings=sender_settings
+        lead=lead_data, campaign=campaign_data, sender_settings=sender_settings
     )
 
     return context_data
-

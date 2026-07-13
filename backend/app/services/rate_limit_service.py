@@ -1,7 +1,6 @@
+import datetime
 import logging
 import os
-import datetime
-from typing import Any
 
 from app.config import settings
 from app.database import supabase
@@ -32,7 +31,9 @@ class RateLimitService:
         max_emails = cap or self.limit
 
         # Calculate today's starting timestamp
-        today_start = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time.min).isoformat()
+        today_start = datetime.datetime.combine(
+            datetime.datetime.now().date(), datetime.time.min
+        ).isoformat()
 
         try:
             res = (
@@ -61,7 +62,9 @@ class RateLimitService:
         if not supabase:
             return True
 
-        today_start = datetime.datetime.combine(datetime.datetime.now().date(), datetime.time.min).isoformat()
+        today_start = datetime.datetime.combine(
+            datetime.datetime.now().date(), datetime.time.min
+        ).isoformat()
 
         try:
             res = (
@@ -93,6 +96,7 @@ class RateLimitService:
         if redis_url:
             try:
                 import redis
+
                 r = redis.Redis.from_url(redis_url, socket_timeout=2)
                 current = r.incr(key)
                 if current == 1:
@@ -123,26 +127,30 @@ class RateLimitService:
                 if val >= max_requests:
                     if row["expires_at"] < now_str:
                         # Reset expired key
-                        expires_at = (now + datetime.timedelta(seconds=window_seconds)).isoformat()
-                        supabase.table("rate_limits").update({
-                            "value": 1,
-                            "expires_at": expires_at
-                        }).eq("id", row["id"]).execute()
+                        expires_at = (
+                            now + datetime.timedelta(seconds=window_seconds)
+                        ).isoformat()
+                        supabase.table("rate_limits").update(
+                            {"value": 1, "expires_at": expires_at}
+                        ).eq("id", row["id"]).execute()
                         return False
                     return True
                 else:
-                    supabase.table("rate_limits").update({
-                        "value": val + 1
-                    }).eq("id", row["id"]).execute()
+                    supabase.table("rate_limits").update({"value": val + 1}).eq(
+                        "id", row["id"]
+                    ).execute()
                     return False
             else:
-                expires_at = (now + datetime.timedelta(seconds=window_seconds)).isoformat()
+                expires_at = (
+                    now + datetime.timedelta(seconds=window_seconds)
+                ).isoformat()
                 import uuid
+
                 payload = {
                     "id": str(uuid.uuid4()),
                     "key": key,
                     "value": 1,
-                    "expires_at": expires_at
+                    "expires_at": expires_at,
                 }
                 supabase.table("rate_limits").insert(payload).execute()
                 return False

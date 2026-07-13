@@ -45,7 +45,7 @@ class Settings(BaseSettings):
 
     # App Port
     PORT: int = 8000
-    
+
     # Server-side encryption key
     ENCRYPTION_KEY: str = ""
 

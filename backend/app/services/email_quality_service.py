@@ -37,23 +37,27 @@ class EmailQualityService:
         user_id = lead.get("user_id") if lead else None
         if user_id:
             from app.routes.settings import get_owner_settings_sync
+
             owner_settings = get_owner_settings_sync(user_id)
             return {
                 "sender_name": owner_settings.get("sender_name") or settings.YOUR_NAME,
-                "agency": owner_settings.get("business_name") or settings.YOUR_AGENCY_NAME,
+                "agency": owner_settings.get("business_name")
+                or settings.YOUR_AGENCY_NAME,
                 "website": owner_settings.get("website") or settings.YOUR_WEBSITE,
                 "phone": owner_settings.get("sender_phone") or settings.YOUR_PHONE,
-                "default_signature": owner_settings.get("default_signature")
+                "default_signature": owner_settings.get("default_signature"),
             }
         return {
             "sender_name": settings.YOUR_NAME,
             "agency": settings.YOUR_AGENCY_NAME,
             "website": settings.YOUR_WEBSITE,
             "phone": settings.YOUR_PHONE,
-            "default_signature": None
+            "default_signature": None,
         }
 
-    def clean_and_normalize(self, subject: str, body: str, lead: dict = None) -> dict[str, str]:
+    def clean_and_normalize(
+        self, subject: str, body: str, lead: dict = None
+    ) -> dict[str, str]:
         """
         Cleans up leaked subjects and normalizes signature blocks.
         """

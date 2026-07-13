@@ -1,6 +1,8 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
+
 from pydantic import BaseModel, Field, model_validator
+
 from app.models.constants import CampaignStatus
 
 
@@ -17,45 +19,46 @@ class CampaignBase(BaseModel):
         50, description="Maximum emails dispatched per 24 hours"
     )
     delay_seconds: int = Field(5, description="Inter-send pause interval")
-    
+
     # Generic campaign configurations
-    preset: Optional[str] = None
-    objective: Optional[str] = None
-    description: Optional[str] = None
-    offer: Optional[str] = None
-    value_proposition: Optional[str] = None
-    proof_points: Optional[str] = None
-    required_facts: Optional[str] = None
-    prohibited_claims: Optional[str] = None
-    target_industry: Optional[str] = None
-    target_roles: Optional[str] = None
-    countries: Optional[str] = None
-    tags: List[str] = Field(default_factory=list)
+    preset: str | None = None
+    objective: str | None = None
+    description: str | None = None
+    offer: str | None = None
+    value_proposition: str | None = None
+    proof_points: str | None = None
+    required_facts: str | None = None
+    prohibited_claims: str | None = None
+    target_industry: str | None = None
+    target_roles: str | None = None
+    countries: str | None = None
+    tags: list[str] = Field(default_factory=list)
     min_lead_fit_score: int = 0
-    selected_leads: List[str] = Field(default_factory=list)
-    tone: Optional[str] = None
+    selected_leads: list[str] = Field(default_factory=list)
+    tone: str | None = None
     email_length: str = "medium"
     language: str = "en"
-    CTA: Optional[str] = None
-    required_content: List[str] = Field(default_factory=list)
-    banned_content: List[str] = Field(default_factory=list)
-    prompt_template_id: Optional[str] = None
-    sequence_id: Optional[str] = None
+    CTA: str | None = None
+    required_content: list[str] = Field(default_factory=list)
+    banned_content: list[str] = Field(default_factory=list)
+    prompt_template_id: str | None = None
+    sequence_id: str | None = None
     timezone: str = "UTC"
     send_spacing_seconds: int = 60
     sending_window_start: str = "09:00"
     sending_window_end: str = "17:00"
-    start_date: Optional[str] = None
+    start_date: str | None = None
     approval_mode: str = "manual"
-    sender_profile_snapshot: Dict[str, Any] = Field(default_factory=dict)
-    prompt_config_snapshot: Dict[str, Any] = Field(default_factory=dict)
-    cloned_from_id: Optional[str] = None
+    sender_profile_snapshot: dict[str, Any] = Field(default_factory=dict)
+    prompt_config_snapshot: dict[str, Any] = Field(default_factory=dict)
+    cloned_from_id: str | None = None
 
     @model_validator(mode="before")
     @classmethod
     def parse_json_strings(cls, data: Any) -> Any:
         if isinstance(data, dict):
             import json
+
             for key in ["tags", "selected_leads", "required_content", "banned_content"]:
                 val = data.get(key)
                 if isinstance(val, str):
@@ -78,43 +81,43 @@ class CampaignCreate(CampaignBase):
 
 
 class CampaignUpdate(BaseModel):
-    name: Optional[str] = None
-    campaign_type: Optional[str] = None
-    status: Optional[CampaignStatus] = None
-    daily_send_limit: Optional[int] = None
-    delay_seconds: Optional[int] = None
-    
-    preset: Optional[str] = None
-    objective: Optional[str] = None
-    description: Optional[str] = None
-    offer: Optional[str] = None
-    value_proposition: Optional[str] = None
-    proof_points: Optional[str] = None
-    required_facts: Optional[str] = None
-    prohibited_claims: Optional[str] = None
-    target_industry: Optional[str] = None
-    target_roles: Optional[str] = None
-    countries: Optional[str] = None
-    tags: Optional[List[str]] = None
-    min_lead_fit_score: Optional[int] = None
-    selected_leads: Optional[List[str]] = None
-    tone: Optional[str] = None
-    email_length: Optional[str] = None
-    language: Optional[str] = None
-    CTA: Optional[str] = None
-    required_content: Optional[List[str]] = None
-    banned_content: Optional[List[str]] = None
-    prompt_template_id: Optional[str] = None
-    sequence_id: Optional[str] = None
-    timezone: Optional[str] = None
-    send_spacing_seconds: Optional[int] = None
-    sending_window_start: Optional[str] = None
-    sending_window_end: Optional[str] = None
-    start_date: Optional[str] = None
-    approval_mode: Optional[str] = None
-    sender_profile_snapshot: Optional[Dict[str, Any]] = None
-    prompt_config_snapshot: Optional[Dict[str, Any]] = None
-    cloned_from_id: Optional[str] = None
+    name: str | None = None
+    campaign_type: str | None = None
+    status: CampaignStatus | None = None
+    daily_send_limit: int | None = None
+    delay_seconds: int | None = None
+
+    preset: str | None = None
+    objective: str | None = None
+    description: str | None = None
+    offer: str | None = None
+    value_proposition: str | None = None
+    proof_points: str | None = None
+    required_facts: str | None = None
+    prohibited_claims: str | None = None
+    target_industry: str | None = None
+    target_roles: str | None = None
+    countries: str | None = None
+    tags: list[str] | None = None
+    min_lead_fit_score: int | None = None
+    selected_leads: list[str] | None = None
+    tone: str | None = None
+    email_length: str | None = None
+    language: str | None = None
+    CTA: str | None = None
+    required_content: list[str] | None = None
+    banned_content: list[str] | None = None
+    prompt_template_id: str | None = None
+    sequence_id: str | None = None
+    timezone: str | None = None
+    send_spacing_seconds: int | None = None
+    sending_window_start: str | None = None
+    sending_window_end: str | None = None
+    start_date: str | None = None
+    approval_mode: str | None = None
+    sender_profile_snapshot: dict[str, Any] | None = None
+    prompt_config_snapshot: dict[str, Any] | None = None
+    cloned_from_id: str | None = None
 
 
 class Campaign(CampaignBase):

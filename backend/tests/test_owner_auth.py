@@ -75,7 +75,9 @@ def test_protected_sending_endpoint(mocker):
     mocker.patch("app.utils.auth.settings.DEMO_MODE", True)
 
     mock_supabase = mocker.MagicMock()
-    mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mocker.Mock(data=[])
+    mock_supabase.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value = mocker.Mock(
+        data=[]
+    )
     mocker.patch("app.database.supabase", mock_supabase)
 
     # 1. Unauthenticated request to individual send

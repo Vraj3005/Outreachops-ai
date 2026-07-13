@@ -1,15 +1,18 @@
 import json
 import logging
 from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, status
-from app.database import supabase
-from app.schemas.settings import OwnerSettingsUpdate, OwnerSettingsResponse
-from app.utils.auth import require_owner
+
 from app.config import settings
+from app.database import supabase
+from app.schemas.settings import OwnerSettingsResponse, OwnerSettingsUpdate
+from app.utils.auth import require_owner
 
 logger = logging.getLogger("outreachops.routes.settings")
 
 router = APIRouter(prefix="/settings", tags=["settings"])
+
 
 def get_default_owner_settings(owner_id: str) -> dict[str, Any]:
     return {
@@ -32,12 +35,18 @@ def get_default_owner_settings(owner_id: str) -> dict[str, Any]:
         "allowed_send_start": "09:00",
         "allowed_send_end": "17:00",
         "required_footer": "To opt-out, please reply to this email requesting removal.",
-        "banned_phrases": []
+        "banned_phrases": [],
     }
+
 
 def get_owner_settings_sync(owner_id: str) -> dict[str, Any]:
     try:
-        res = supabase.table("owner_settings").select("*").eq("owner_id", owner_id).execute()
+        res = (
+            supabase.table("owner_settings")
+            .select("*")
+            .eq("owner_id", owner_id)
+            .execute()
+        )
         if res.data and len(res.data) > 0:
             row = res.data[0]
             if isinstance(row.get("banned_phrases"), str):
@@ -50,6 +59,7 @@ def get_owner_settings_sync(owner_id: str) -> dict[str, Any]:
         logger.warning(f"Error fetching owner settings sync: {e}")
     return get_default_owner_settings(owner_id)
 
+
 @router.get("", response_model=OwnerSettingsResponse)
 async def get_settings(owner: dict = Depends(require_owner)):
     """
@@ -57,7 +67,12 @@ async def get_settings(owner: dict = Depends(require_owner)):
     """
     owner_id = owner["id"]
     try:
-        res = supabase.table("owner_settings").select("*").eq("owner_id", owner_id).execute()
+        res = (
+            supabase.table("owner_settings")
+            .select("*")
+            .eq("owner_id", owner_id)
+            .execute()
+        )
         if res.data and len(res.data) > 0:
             row = res.data[0]
             # Convert banned_phrases from string representation if SQLite
@@ -70,12 +85,12 @@ async def get_settings(owner: dict = Depends(require_owner)):
 
         # Auto-create settings record with defaults
         defaults = get_default_owner_settings(owner_id)
-        
+
         # Format banned_phrases for SQLite
         db_payload = dict(defaults)
-        if not hasattr(supabase, "table_name"): # SQLite client check
+        if not hasattr(supabase, "table_name"):  # SQLite client check
             db_payload["banned_phrases"] = json.dumps(defaults["banned_phrases"])
-            
+
         supabase.table("owner_settings").insert(db_payload).execute()
         return defaults
 
@@ -83,18 +98,26 @@ async def get_settings(owner: dict = Depends(require_owner)):
         logger.error(f"Error fetching owner settings: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error retrieving owner settings"
+            detail="Error retrieving owner settings",
         )
 
+
 @router.patch("", response_model=OwnerSettingsResponse)
-async def update_settings(payload: OwnerSettingsUpdate, owner: dict = Depends(require_owner)):
+async def update_settings(
+    payload: OwnerSettingsUpdate, owner: dict = Depends(require_owner)
+):
     """
     Update owner settings configuration.
     """
     owner_id = owner["id"]
     try:
         # Check if record exists
-        res = supabase.table("owner_settings").select("*").eq("owner_id", owner_id).execute()
+        res = (
+            supabase.table("owner_settings")
+            .select("*")
+            .eq("owner_id", owner_id)
+            .execute()
+        )
         if not res.data:
             # Auto-create defaults first
             defaults = get_default_owner_settings(owner_id)
@@ -105,7 +128,7 @@ async def update_settings(payload: OwnerSettingsUpdate, owner: dict = Depends(re
 
         # Update fields
         update_data = payload.model_dump(exclude_unset=True)
-        
+
         # Serialize list fields for SQLite compatibility
         if not hasattr(supabase, "table_name") and "banned_phrases" in update_data:
             update_data["banned_phrases"] = json.dumps(update_data["banned_phrases"])
@@ -116,19 +139,21 @@ async def update_settings(payload: OwnerSettingsUpdate, owner: dict = Depends(re
             .eq("owner_id", owner_id)
             .execute()
         )
-        
+
         if res_update.data and len(res_update.data) > 0:
             updated_row = res_update.data[0]
             if isinstance(updated_row.get("banned_phrases"), str):
                 try:
-                    updated_row["banned_phrases"] = json.loads(updated_row["banned_phrases"])
+                    updated_row["banned_phrases"] = json.loads(
+                        updated_row["banned_phrases"]
+                    )
                 except Exception:
                     updated_row["banned_phrases"] = []
             return updated_row
-            
+
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Owner settings record not found to update"
+            detail="Owner settings record not found to update",
         )
 
     except HTTPException:
@@ -137,5 +162,5 @@ async def update_settings(payload: OwnerSettingsUpdate, owner: dict = Depends(re
         logger.error(f"Error updating owner settings: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error updating owner settings"
+            detail="Error updating owner settings",
         )

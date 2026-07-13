@@ -1,25 +1,20 @@
-import os
-import sys
-import time
+import base64
+import datetime
 import json
 import logging
-import datetime
+import os
 import random
 import signal
+import sys
 import threading
-import email.message
-import base64
-from typing import Dict, Any, List, Optional
+import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
-from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
+from typing import Any
 
 from app.config import settings
 from app.database import supabase
 from app.services.gmail_service import GmailService
-from app.services.rate_limit_service import RateLimitService
 
 logger = logging.getLogger("outreachops.services.durable_sending_worker")
 
@@ -28,7 +23,10 @@ class DurableSendingWorker:
     _thread: threading.Thread = None
     _stop_event = threading.Event()
     _running = False
-    _heartbeat_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "worker_heartbeat.json")
+    _heartbeat_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "worker_heartbeat.json",
+    )
 
     @classmethod
     def start(cls):
@@ -57,10 +55,10 @@ class DurableSendingWorker:
                 cls.tick()
             except Exception as e:
                 logger.error(f"Error in durable worker iteration: {e}")
-            
+
             # Health heartbeat update
             cls._update_heartbeat()
-            
+
             cls._stop_event.wait(3.0)
 
     @classmethod
@@ -70,7 +68,7 @@ class DurableSendingWorker:
                 "status": "healthy",
                 "last_heartbeat": datetime.datetime.now(datetime.UTC).isoformat(),
                 "pid": os.getpid(),
-                "timestamp": time.time()
+                "timestamp": time.time(),
             }
             with open(cls._heartbeat_path, "w") as f:
                 json.dump(hb_data, f)
@@ -78,16 +76,22 @@ class DurableSendingWorker:
             logger.error(f"Failed to update worker heartbeat file: {e}")
 
     @classmethod
-    def get_health_status(cls) -> Dict[str, Any]:
+    def get_health_status(cls) -> dict[str, Any]:
         """Reads local heartbeat file to confirm worker status."""
         try:
             if os.path.exists(cls._heartbeat_path):
-                with open(cls._heartbeat_path, "r") as f:
+                with open(cls._heartbeat_path) as f:
                     hb = json.load(f)
                 age = time.time() - hb.get("timestamp", 0)
-                if age < 15: # Within 15 seconds is healthy
-                    return {"status": "healthy", "last_heartbeat": hb.get("last_heartbeat")}
-            return {"status": "offline", "reason": "No active heartbeat registered within bounds"}
+                if age < 15:  # Within 15 seconds is healthy
+                    return {
+                        "status": "healthy",
+                        "last_heartbeat": hb.get("last_heartbeat"),
+                    }
+            return {
+                "status": "offline",
+                "reason": "No active heartbeat registered within bounds",
+            }
         except Exception as e:
             return {"status": "error", "reason": str(e)}
 
@@ -100,17 +104,19 @@ class DurableSendingWorker:
             return
 
         now_str = datetime.datetime.now(datetime.UTC).isoformat()
-        
+
         # Concurrency-safe claim logic
         # 1. Fetch pending candidates
-        cand_res = supabase.table("scheduled_emails")\
-            .select("*")\
-            .in_("status", ["pending", "retry"])\
+        cand_res = (
+            supabase.table("scheduled_emails")
+            .select("*")
+            .in_("status", ["pending", "retry"])
             .execute()
+        )
 
         candidates = cand_res.data or []
         due_candidates = []
-        
+
         for cand in candidates:
             sched_time = cand.get("scheduled_for") or cand.get("scheduled_at")
             if sched_time and sched_time <= now_str:
@@ -120,11 +126,19 @@ class DurableSendingWorker:
         batch = due_candidates[:5]
         for job in batch:
             # Atomic claim status transition check
-            claim_res = supabase.table("scheduled_emails").update({
-                "status": "processing",
-                "attempts": (job.get("attempts") or 0) + 1,
-                "updated_at": now_str
-            }).eq("id", job["id"]).eq("status", job["status"]).execute()
+            claim_res = (
+                supabase.table("scheduled_emails")
+                .update(
+                    {
+                        "status": "processing",
+                        "attempts": (job.get("attempts") or 0) + 1,
+                        "updated_at": now_str,
+                    }
+                )
+                .eq("id", job["id"])
+                .eq("status", job["status"])
+                .execute()
+            )
 
             if not claim_res.data:
                 # Claim failed (claimed by another process thread), skip
@@ -133,7 +147,7 @@ class DurableSendingWorker:
             cls._process_job(job)
 
     @classmethod
-    def _process_job(cls, job: Dict[str, Any]):
+    def _process_job(cls, job: dict[str, Any]):
         now_str = datetime.datetime.now(datetime.UTC).isoformat()
         draft_id = job["draft_id"]
         lead_id = job["lead_id"]
@@ -143,23 +157,28 @@ class DurableSendingWorker:
         try:
             # 1. Idempotency Check (Check if already sent)
             if job.get("idempotency_key"):
-                sent_check = supabase.table("send_events")\
-                    .select("id")\
-                    .eq("user_id", user_id)\
-                    .eq("campaign_id", campaign_id)\
-                    .eq("lead_id", lead_id)\
-                    .eq("event_type", "sent")\
+                sent_check = (
+                    supabase.table("send_events")
+                    .select("id")
+                    .eq("user_id", user_id)
+                    .eq("campaign_id", campaign_id)
+                    .eq("lead_id", lead_id)
+                    .eq("event_type", "sent")
                     .execute()
+                )
                 if sent_check.data:
-                    logger.warning(f"Idempotency violation caught. Skip dispatching scheduled_email {job['id']}.")
-                    supabase.table("scheduled_emails").update({
-                        "status": "sent",
-                        "updated_at": now_str
-                    }).eq("id", job["id"]).execute()
+                    logger.warning(
+                        f"Idempotency violation caught. Skip dispatching scheduled_email {job['id']}."
+                    )
+                    supabase.table("scheduled_emails").update(
+                        {"status": "sent", "updated_at": now_str}
+                    ).eq("id", job["id"]).execute()
                     return
 
             # 2. Fetch dependencies
-            camp_res = supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
+            camp_res = (
+                supabase.table("campaigns").select("*").eq("id", campaign_id).execute()
+            )
             if not camp_res.data:
                 raise ValueError("Campaign not found")
             campaign = camp_res.data[0]
@@ -169,7 +188,9 @@ class DurableSendingWorker:
                 raise ValueError("Lead not found")
             lead = lead_res.data[0]
 
-            draft_res = supabase.table("email_drafts").select("*").eq("id", draft_id).execute()
+            draft_res = (
+                supabase.table("email_drafts").select("*").eq("id", draft_id).execute()
+            )
             if not draft_res.data:
                 raise ValueError("Draft not found")
             draft = draft_res.data[0]
@@ -186,11 +207,23 @@ class DurableSendingWorker:
 
         except Exception as e:
             err_str = str(e).lower()
-            is_trans = ("429" in err_str or "503" in err_str or "timeout" in err_str or "rate limit" in err_str or "overloaded" in err_str)
+            is_trans = (
+                "429" in err_str
+                or "503" in err_str
+                or "timeout" in err_str
+                or "rate limit" in err_str
+                or "overloaded" in err_str
+            )
             cls._mark_failed(job, str(e), is_transient=is_trans)
 
     @classmethod
-    def _check_guardrails(cls, job: Dict[str, Any], campaign: Dict[str, Any], lead: Dict[str, Any], draft: Dict[str, Any]) -> tuple[bool, Optional[str]]:
+    def _check_guardrails(
+        cls,
+        job: dict[str, Any],
+        campaign: dict[str, Any],
+        lead: dict[str, Any],
+        draft: dict[str, Any],
+    ) -> tuple[bool, str | None]:
         # A. Demo Mode validation
         if settings.DEMO_MODE and not settings.DEMO_SENDING_ENABLED:
             return False, "Demo Mode active. Sending is disabled."
@@ -201,7 +234,10 @@ class DurableSendingWorker:
 
         # C. Draft Approved Status
         if draft.get("status") != "approved":
-            return False, f"Associated draft is in status '{draft.get('status')}', not approved"
+            return (
+                False,
+                f"Associated draft is in status '{draft.get('status')}', not approved",
+            )
 
         # D. Lead validity check
         if lead.get("lead_status") == "Archived":
@@ -211,16 +247,19 @@ class DurableSendingWorker:
         email_str = (lead.get("contact_email") or "").strip()
         email_str = email_str.replace("\r", "").replace("\n", "")
         import re
+
         email_regex = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$"
         if not re.match(email_regex, email_str):
             return False, f"Invalid recipient email formatting: '{email_str}'"
 
         # F. Not DNC check
-        dnc_res = supabase.table("do_not_contact")\
-            .select("id")\
-            .eq("user_id", job["user_id"])\
-            .eq("email", email_str.strip().lower())\
+        dnc_res = (
+            supabase.table("do_not_contact")
+            .select("id")
+            .eq("user_id", job["user_id"])
+            .eq("email", email_str.strip().lower())
             .execute()
+        )
         if dnc_res.data:
             return False, "Recipient is on the Do Not Contact (DNC) list"
 
@@ -241,12 +280,14 @@ class DurableSendingWorker:
                 return False, f"Recipient lead is opt-out blocked by tag: '{tag}'"
 
         # H. Active reply search
-        events_res = supabase.table("send_events")\
-            .select("event_type")\
-            .eq("campaign_id", campaign["id"])\
-            .eq("lead_id", lead["id"])\
+        events_res = (
+            supabase.table("send_events")
+            .select("event_type")
+            .eq("campaign_id", campaign["id"])
+            .eq("lead_id", lead["id"])
             .execute()
-        for ev in (events_res.data or []):
+        )
+        for ev in events_res.data or []:
             if ev.get("event_type") in ["reply", "replied"]:
                 return False, "Recipient replied to previous thread step"
             if ev.get("event_type") == "bounce":
@@ -265,10 +306,11 @@ class DurableSendingWorker:
         exclude_weekends = bool(campaign.get("exclude_weekends", 1))
 
         from zoneinfo import ZoneInfo
+
         try:
             tz = ZoneInfo(timezone_str)
         except Exception:
-            tz = datetime.timezone.utc
+            tz = datetime.UTC
 
         now_local = datetime.datetime.now(tz)
         if exclude_weekends and now_local.weekday() >= 5:
@@ -283,25 +325,38 @@ class DurableSendingWorker:
 
         curr_mins = now_local.hour * 60 + now_local.minute
         if curr_mins < (sh * 60 + sm) or curr_mins > (eh * 60 + em):
-            return False, f"Current hour falls outside allowed sending hours window: {window_start}-{window_end}"
+            return (
+                False,
+                f"Current hour falls outside allowed sending hours window: {window_start}-{window_end}",
+            )
 
         return True, None
 
     @classmethod
     def _count_today_sends(cls, user_id: str) -> int:
         now = datetime.datetime.now(datetime.UTC)
-        start_of_day = datetime.datetime(now.year, now.month, now.day, 0, 0, 0, tzinfo=datetime.UTC).isoformat()
-        
-        events = supabase.table("send_events")\
-            .select("id")\
-            .eq("user_id", user_id)\
-            .eq("event_type", "sent")\
-            .gte("occurred_at", start_of_day)\
+        start_of_day = datetime.datetime(
+            now.year, now.month, now.day, 0, 0, 0, tzinfo=datetime.UTC
+        ).isoformat()
+
+        events = (
+            supabase.table("send_events")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("event_type", "sent")
+            .gte("occurred_at", start_of_day)
             .execute()
+        )
         return len(events.data or [])
 
     @classmethod
-    def _dispatch_gmail(cls, job: Dict[str, Any], campaign: Dict[str, Any], lead: Dict[str, Any], draft: Dict[str, Any]):
+    def _dispatch_gmail(
+        cls,
+        job: dict[str, Any],
+        campaign: dict[str, Any],
+        lead: dict[str, Any],
+        draft: dict[str, Any],
+    ):
         gmail_service = GmailService()
         user_id = job["user_id"]
         recipient = lead["contact_email"]
@@ -318,7 +373,9 @@ class DurableSendingWorker:
         if settings.DEMO_MODE:
             gmail_message_id = f"demo_msg_{job['id']}_{int(time.time())}"
             gmail_thread_id = f"demo_thread_{job['id']}"
-            logger.info(f"[Demo Mode] Dispatched email to {clean_recipient} (ID: {gmail_message_id})")
+            logger.info(
+                f"[Demo Mode] Dispatched email to {clean_recipient} (ID: {gmail_message_id})"
+            )
         else:
             # Refresh connection
             gmail_service.check_connection_status(user_id)
@@ -331,24 +388,30 @@ class DurableSendingWorker:
 
             # Reply Threading
             # Find previous step dispatched message
-            prev_events = supabase.table("send_events")\
-                .select("gmail_message_id, gmail_thread_id")\
-                .eq("campaign_id", campaign["id"])\
-                .eq("lead_id", lead["id"])\
-                .eq("event_type", "sent")\
-                .order("occurred_at", desc=True)\
+            prev_events = (
+                supabase.table("send_events")
+                .select("gmail_message_id, gmail_thread_id")
+                .eq("campaign_id", campaign["id"])
+                .eq("lead_id", lead["id"])
+                .eq("event_type", "sent")
+                .order("occurred_at", desc=True)
                 .execute()
+            )
 
             body_payload = {}
             if prev_events.data and prev_events.data[0].get("gmail_message_id"):
                 prev_msg_id = prev_events.data[0]["gmail_message_id"]
                 prev_thread_id = prev_events.data[0]["gmail_thread_id"]
-                
+
                 # Format headers properly
-                formatted_msg_id = prev_msg_id if (prev_msg_id.startswith("<") and prev_msg_id.endswith(">")) else f"<{prev_msg_id}>"
+                formatted_msg_id = (
+                    prev_msg_id
+                    if (prev_msg_id.startswith("<") and prev_msg_id.endswith(">"))
+                    else f"<{prev_msg_id}>"
+                )
                 message["In-Reply-To"] = formatted_msg_id
                 message["References"] = formatted_msg_id
-                
+
                 body_payload["threadId"] = prev_thread_id
                 gmail_thread_id = prev_thread_id
 
@@ -356,120 +419,146 @@ class DurableSendingWorker:
             body_payload["raw"] = raw_msg
 
             # Send via Gmail
-            res = gmail_client.users().messages().send(userId="me", body=body_payload).execute()
+            res = (
+                gmail_client.users()
+                .messages()
+                .send(userId="me", body=body_payload)
+                .execute()
+            )
             gmail_message_id = res.get("id")
             gmail_thread_id = res.get("threadId") or gmail_thread_id or gmail_message_id
 
         now_str = datetime.datetime.now(datetime.UTC).isoformat()
 
         # Update draft
-        supabase.table("email_drafts").update({
-            "status": "sent",
-            "sent_at": now_str
-        }).eq("id", draft["id"]).execute()
+        supabase.table("email_drafts").update(
+            {"status": "sent", "sent_at": now_str}
+        ).eq("id", draft["id"]).execute()
 
         # Insert send event log
-        event_id = str(mocker_uuid() if "mocker_uuid" in globals() else uuid_gen())
-        supabase.table("send_events").insert({
-            "id": event_id,
-            "user_id": user_id,
-            "campaign_id": campaign["id"],
-            "lead_id": lead["id"],
-            "scheduled_email_id": job["id"],
-            "event_type": "sent",
-            "recipient_email": recipient,
-            "gmail_message_id": gmail_message_id,
-            "gmail_thread_id": gmail_thread_id,
-            "variant_id": draft.get("variant_id"),
-            "variant_name": draft.get("variant_name"),
-            "prompt_version_id": draft.get("prompt_version"),
-            "occurred_at": now_str
-        }).execute()
+        mocker_func = globals().get("mocker_uuid")
+        event_id = str(mocker_func() if mocker_func else uuid_gen())
+        supabase.table("send_events").insert(
+            {
+                "id": event_id,
+                "user_id": user_id,
+                "campaign_id": campaign["id"],
+                "lead_id": lead["id"],
+                "scheduled_email_id": job["id"],
+                "event_type": "sent",
+                "recipient_email": recipient,
+                "gmail_message_id": gmail_message_id,
+                "gmail_thread_id": gmail_thread_id,
+                "variant_id": draft.get("variant_id"),
+                "variant_name": draft.get("variant_name"),
+                "prompt_version_id": draft.get("prompt_version"),
+                "occurred_at": now_str,
+            }
+        ).execute()
 
         # Update scheduled email record status to sent
-        supabase.table("scheduled_emails").update({
-            "status": "sent",
-            "gmail_message_id": gmail_message_id,
-            "gmail_thread_id": gmail_thread_id,
-            "updated_at": now_str
-        }).eq("id", job["id"]).execute()
+        supabase.table("scheduled_emails").update(
+            {
+                "status": "sent",
+                "gmail_message_id": gmail_message_id,
+                "gmail_thread_id": gmail_thread_id,
+                "updated_at": now_str,
+            }
+        ).eq("id", job["id"]).execute()
 
         # Transition next sequence step state
         from app.services.sequence_service import SequenceService
-        cl_res = supabase.table("campaign_leads")\
-            .select("id")\
-            .eq("campaign_id", campaign["id"])\
-            .eq("lead_id", lead["id"])\
+
+        cl_res = (
+            supabase.table("campaign_leads")
+            .select("id")
+            .eq("campaign_id", campaign["id"])
+            .eq("lead_id", lead["id"])
             .execute()
+        )
         if cl_res.data:
             SequenceService.transition_sent(cl_res.data[0]["id"])
 
         logger.info(f"Durable dispatch success: Job {job['id']} for lead {lead['id']}")
 
     @classmethod
-    def _mark_failed(cls, job: Dict[str, Any], error: str, is_transient: bool):
+    def _mark_failed(cls, job: dict[str, Any], error: str, is_transient: bool):
         now_str = datetime.datetime.now(datetime.UTC).isoformat()
         attempts = job.get("attempts") or 1
 
         if is_transient and attempts < 3:
             # Exponential backoff + jitter (2^attempts minutes delay)
-            backoff_mins = (2 ** attempts) + random.uniform(0.5, 1.5)
-            next_time = datetime.datetime.now(datetime.UTC) + datetime.timedelta(minutes=backoff_mins)
-            
-            supabase.table("scheduled_emails").update({
-                "status": "retry",
-                "last_error": error,
-                "scheduled_for": next_time.isoformat(),
-                "updated_at": now_str
-            }).eq("id", job["id"]).execute()
-            
-            logger.info(f"Transient error on job {job['id']}. Rescheduled for retry at {next_time.isoformat()}")
+            backoff_mins = (2**attempts) + random.uniform(0.5, 1.5)
+            next_time = datetime.datetime.now(datetime.UTC) + datetime.timedelta(
+                minutes=backoff_mins
+            )
+
+            supabase.table("scheduled_emails").update(
+                {
+                    "status": "retry",
+                    "last_error": error,
+                    "scheduled_for": next_time.isoformat(),
+                    "updated_at": now_str,
+                }
+            ).eq("id", job["id"]).execute()
+
+            logger.info(
+                f"Transient error on job {job['id']}. Rescheduled for retry at {next_time.isoformat()}"
+            )
         else:
             # Permanent failure or dead-letter bounds exceeded
-            supabase.table("scheduled_emails").update({
-                "status": "failed",
-                "last_error": error,
-                "updated_at": now_str
-            }).eq("id", job["id"]).execute()
+            supabase.table("scheduled_emails").update(
+                {"status": "failed", "last_error": error, "updated_at": now_str}
+            ).eq("id", job["id"]).execute()
 
             # Mark campaign lead step failed
-            supabase.table("campaign_leads").update({
-                "status": "failed",
-                "last_error": error
-            }).eq("campaign_id", job["campaign_id"]).eq("lead_id", job["lead_id"]).execute()
+            supabase.table("campaign_leads").update(
+                {"status": "failed", "last_error": error}
+            ).eq("campaign_id", job["campaign_id"]).eq(
+                "lead_id", job["lead_id"]
+            ).execute()
 
             # Insert failure event log
             draft_id = job.get("draft_id")
             draft = {}
             if draft_id:
                 try:
-                    draft_res = supabase.table("email_drafts").select("variant_id, variant_name, prompt_version").eq("id", draft_id).execute()
+                    draft_res = (
+                        supabase.table("email_drafts")
+                        .select("variant_id, variant_name, prompt_version")
+                        .eq("id", draft_id)
+                        .execute()
+                    )
                     if draft_res.data:
                         draft = draft_res.data[0]
                 except Exception:
                     pass
 
-            event_id = str(mocker_uuid() if "mocker_uuid" in globals() else uuid_gen())
-            supabase.table("send_events").insert({
-                "id": event_id,
-                "user_id": job["user_id"],
-                "campaign_id": job["campaign_id"],
-                "lead_id": job["lead_id"],
-                "scheduled_email_id": job["id"],
-                "event_type": "failed",
-                "recipient_email": "",
-                "error_message": error,
-                "variant_id": draft.get("variant_id"),
-                "variant_name": draft.get("variant_name"),
-                "prompt_version_id": draft.get("prompt_version"),
-                "occurred_at": now_str
-            }).execute()
+            mocker_func = globals().get("mocker_uuid")
+            event_id = str(mocker_func() if mocker_func else uuid_gen())
+            supabase.table("send_events").insert(
+                {
+                    "id": event_id,
+                    "user_id": job["user_id"],
+                    "campaign_id": job["campaign_id"],
+                    "lead_id": job["lead_id"],
+                    "scheduled_email_id": job["id"],
+                    "event_type": "failed",
+                    "recipient_email": "",
+                    "error_message": error,
+                    "variant_id": draft.get("variant_id"),
+                    "variant_name": draft.get("variant_name"),
+                    "prompt_version_id": draft.get("prompt_version"),
+                    "occurred_at": now_str,
+                }
+            ).execute()
 
             logger.error(f"Permanent dispatch failure on job {job['id']}: {error}")
 
 
 def uuid_gen():
     import uuid
+
     return uuid.uuid4()
 
 

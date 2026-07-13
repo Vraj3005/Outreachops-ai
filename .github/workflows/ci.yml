@@ -1,0 +1,92 @@
+name: OutreachOps AI V2 CI Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  backend-validation:
+    name: Backend Validation & Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Dependencies
+        run: |
+          cd backend
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff black pytest pytest-cov
+
+      - name: Backend Format Check
+        run: |
+          cd backend
+          black --check .
+
+      - name: Backend Lint Check (Ruff)
+        run: |
+          cd backend
+          ruff check .
+
+      - name: Secret Scan (Check for plain keys in workspace)
+        run: |
+          # Block files containing API keys, private passwords, etc.
+          if grep -rni "GEMINI_API_KEY=AIza" backend/ || grep -rni "SUPABASE_SERVICE_ROLE_KEY=ey" backend/; then
+            echo "❌ ERROR: Hardcoded secrets detected in configuration files."
+            exit 1
+          fi
+          echo "✅ Secret scan passed."
+
+      - name: Run Backend & Database Integration Tests
+        run: |
+          cd backend
+          export ENV=test
+          python -m pytest --cov=app --cov-fail-under=15
+
+  frontend-validation:
+    name: Frontend Typecheck, Lint & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Frontend Lint check
+        run: |
+          cd frontend
+          npm run lint
+
+      - name: Frontend Typecheck
+        run: |
+          cd frontend
+          npm run typecheck
+
+      - name: Dependency Audit Scan
+        run: |
+          cd frontend
+          npm audit --audit-level=high || true # Warn but not break on non-critical items
+
+      - name: Production Next.js Build
+        run: |
+          cd frontend
+          npm run build

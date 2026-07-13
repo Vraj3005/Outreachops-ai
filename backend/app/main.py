@@ -29,11 +29,13 @@ from app.routes import (
     drafts,
     emails,
     health,
+    imports,
     integrations,
     leads,
     logs,
     prompts,
-    imports,
+)
+from app.routes import (
     settings as settings_route,
 )
 from app.services.error_service import register_error_handlers
@@ -43,15 +45,15 @@ from app.services.error_service import register_error_handlers
 async def lifespan(app: FastAPI):
     # Startup actions
     init_db()
-    
+
+    from app.services.durable_sending_worker import DurableSendingWorker
     from app.services.generation_worker import GenerationWorker
     from app.services.sequence_cron import SequenceCron
-    from app.services.durable_sending_worker import DurableSendingWorker
-    
+
     GenerationWorker.start()
     SequenceCron.start()
     DurableSendingWorker.start()
-    
+
     yield
     # Shutdown actions
     GenerationWorker.stop()
@@ -83,6 +85,7 @@ app.add_middleware(
 
 from fastapi import Request
 
+
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
     response = await call_next(request)
@@ -99,8 +102,11 @@ async def add_security_headers(request: Request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
     if os.getenv("ENV", "development").lower() == "production":
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
     return response
+
 
 # Register API routers
 app.include_router(health.router, prefix="/api/v1")

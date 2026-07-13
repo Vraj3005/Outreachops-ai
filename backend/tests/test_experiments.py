@@ -1,9 +1,8 @@
-import pytest
-import uuid
-import json
 from unittest.mock import MagicMock, patch
+
+import pytest
+
 from app.services.analytics_service import AnalyticsService
-from app.services.sequence_service import SequenceService
 
 
 @pytest.fixture
@@ -22,6 +21,7 @@ def test_ab_variant_hashing_assignment():
 
     # Hashing should be 100% deterministic
     import hashlib
+
     def get_variant(lead_id):
         hash_input = f"{lead_id}_{exp_id}"
         hash_val = int(hashlib.sha256(hash_input.encode()).hexdigest(), 16)
@@ -38,9 +38,13 @@ def test_analytics_funnel_calculations(mock_supabase):
     Verifies the aggregation of conversion step funnel lists.
     """
     # Mock return values for counts
-    mock_supabase.table().select().eq().execute.return_value = MagicMock(count=10, data=[])
-    mock_supabase.table().select().in_().execute.return_value = MagicMock(count=10, data=[])
-    
+    mock_supabase.table().select().eq().execute.return_value = MagicMock(
+        count=10, data=[]
+    )
+    mock_supabase.table().select().in_().execute.return_value = MagicMock(
+        count=10, data=[]
+    )
+
     metrics = AnalyticsService.get_funnel_metrics("user_123", "campaign_123")
     assert "imported" in metrics
     assert "researched" in metrics
@@ -59,23 +63,52 @@ def test_ab_experiment_statistical_bounds(mock_supabase):
     # 1. Test insufficient data warning (< 50 sends per variant)
     mock_supabase.table().select().eq().execute.side_effect = [
         # Experiments
-        MagicMock(data=[{"id": "exp_123", "name": "Subject Line Test", "status": "active", "primary_metric": "reply_rate"}]),
+        MagicMock(
+            data=[
+                {
+                    "id": "exp_123",
+                    "name": "Subject Line Test",
+                    "status": "active",
+                    "primary_metric": "reply_rate",
+                }
+            ]
+        ),
         # Variants
-        MagicMock(data=[
-            {"id": "v1", "experiment_id": "exp_123", "campaign_id": "c1", "name": "A", "prompt_template_version_id": "ver_a", "weight": 0.5},
-            {"id": "v2", "experiment_id": "exp_123", "campaign_id": "c1", "name": "B", "prompt_template_version_id": "ver_b", "weight": 0.5}
-        ]),
+        MagicMock(
+            data=[
+                {
+                    "id": "v1",
+                    "experiment_id": "exp_123",
+                    "campaign_id": "c1",
+                    "name": "A",
+                    "prompt_template_version_id": "ver_a",
+                    "weight": 0.5,
+                },
+                {
+                    "id": "v2",
+                    "experiment_id": "exp_123",
+                    "campaign_id": "c1",
+                    "name": "B",
+                    "prompt_template_version_id": "ver_b",
+                    "weight": 0.5,
+                },
+            ]
+        ),
         # Assignments
-        MagicMock(data=[
-            {"lead_id": "l1", "variant_name": "A"},
-            {"lead_id": "l2", "variant_name": "B"}
-        ]),
+        MagicMock(
+            data=[
+                {"lead_id": "l1", "variant_name": "A"},
+                {"lead_id": "l2", "variant_name": "B"},
+            ]
+        ),
         # Send events
-        MagicMock(data=[
-            {"variant_name": "A", "event_type": "sent"},
-            {"variant_name": "A", "event_type": "reply"},
-            {"variant_name": "B", "event_type": "sent"}
-        ])
+        MagicMock(
+            data=[
+                {"variant_name": "A", "event_type": "sent"},
+                {"variant_name": "A", "event_type": "reply"},
+                {"variant_name": "B", "event_type": "sent"},
+            ]
+        ),
     ]
 
     report = AnalyticsService.get_experiment_report("user_123", "exp_123")
@@ -85,20 +118,56 @@ def test_ab_experiment_statistical_bounds(mock_supabase):
     # 2. Test sufficient data statistical Z-test execution
     mock_supabase.table().select().eq().execute.side_effect = [
         # Experiments
-        MagicMock(data=[{"id": "exp_123", "name": "Subject Line Test", "status": "active", "primary_metric": "reply_rate"}]),
+        MagicMock(
+            data=[
+                {
+                    "id": "exp_123",
+                    "name": "Subject Line Test",
+                    "status": "active",
+                    "primary_metric": "reply_rate",
+                }
+            ]
+        ),
         # Variants
-        MagicMock(data=[
-            {"id": "v1", "experiment_id": "exp_123", "campaign_id": "c1", "name": "A", "prompt_template_version_id": "ver_a", "weight": 0.5},
-            {"id": "v2", "experiment_id": "exp_123", "campaign_id": "c1", "name": "B", "prompt_template_version_id": "ver_b", "weight": 0.5}
-        ]),
+        MagicMock(
+            data=[
+                {
+                    "id": "v1",
+                    "experiment_id": "exp_123",
+                    "campaign_id": "c1",
+                    "name": "A",
+                    "prompt_template_version_id": "ver_a",
+                    "weight": 0.5,
+                },
+                {
+                    "id": "v2",
+                    "experiment_id": "exp_123",
+                    "campaign_id": "c1",
+                    "name": "B",
+                    "prompt_template_version_id": "ver_b",
+                    "weight": 0.5,
+                },
+            ]
+        ),
         # Assignments
         MagicMock(data=[]),
         # Send events (Variant A has 100 sends, 30 replies. Variant B has 100 sends, 5 replies)
-        MagicMock(data=([{"variant_name": "A", "event_type": "sent"}] * 100 + [{"variant_name": "A", "event_type": "reply"}] * 30 +
-                        [{"variant_name": "B", "event_type": "sent"}] * 100 + [{"variant_name": "B", "event_type": "reply"}] * 5))
+        MagicMock(
+            data=(
+                [{"variant_name": "A", "event_type": "sent"}] * 100
+                + [{"variant_name": "A", "event_type": "reply"}] * 30
+                + [{"variant_name": "B", "event_type": "sent"}] * 100
+                + [{"variant_name": "B", "event_type": "reply"}] * 5
+            )
+        ),
     ]
 
     report_sig = AnalyticsService.get_experiment_report("user_123", "exp_123")
     assert report_sig["comparison"]["insufficient_data"] is False
-    assert report_sig["comparison"]["confidence_interval_95"][0] > 0 # Significant winner A
-    assert "Variant A is the statistically significant winner" in report_sig["comparison"]["declared_winner"]
+    assert (
+        report_sig["comparison"]["confidence_interval_95"][0] > 0
+    )  # Significant winner A
+    assert (
+        "Variant A is the statistically significant winner"
+        in report_sig["comparison"]["declared_winner"]
+    )

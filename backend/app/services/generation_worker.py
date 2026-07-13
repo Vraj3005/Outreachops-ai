@@ -4,9 +4,10 @@ import logging
 import random
 import threading
 import time
-from typing import Any, Dict, Optional
+import uuid
+from typing import Any
 
-from app.database import supabase, SQLiteSupabaseClient
+from app.database import SQLiteSupabaseClient, supabase
 from app.services.email_quality_service import EmailQualityService
 from app.services.gemini_service import GeminiService
 from app.services.generation_job_service import GenerationJobService
@@ -22,7 +23,7 @@ class GenerationWorker:
     Runs on a background thread and claims items concurrency-safely.
     """
 
-    _worker_thread: Optional[threading.Thread] = None
+    _worker_thread: threading.Thread | None = None
     _stop_event = threading.Event()
     worker_id = f"worker-{random.randint(1000, 9999)}"
     poll_interval = 1.0  # seconds
@@ -41,7 +42,9 @@ class GenerationWorker:
             target=cls._run_worker_loop, name="GenerationQueueWorker", daemon=True
         )
         cls._worker_thread.start()
-        logger.info(f"✅ Generation background worker started (Worker ID: {cls.worker_id})")
+        logger.info(
+            f"✅ Generation background worker started (Worker ID: {cls.worker_id})"
+        )
 
     @classmethod
     def stop(cls):
@@ -66,7 +69,9 @@ class GenerationWorker:
                 # 1. Attempt to claim next pending item safely
                 item = cls._claim_next_item()
                 if item:
-                    logger.info(f"Worker {cls.worker_id} claimed item {item['id']} for job {item['job_id']}")
+                    logger.info(
+                        f"Worker {cls.worker_id} claimed item {item['id']} for job {item['job_id']}"
+                    )
                     cls._process_job_item(item)
                     # Loop immediately to check if there are more items
                     continue
@@ -77,7 +82,7 @@ class GenerationWorker:
             time.sleep(cls.poll_interval)
 
     @classmethod
-    def _claim_next_item(cls) -> Optional[Dict[str, Any]]:
+    def _claim_next_item(cls) -> dict[str, Any] | None:
         """
         Atomically claims a pending item to prevent double-claiming by parallel workers.
         Handles SQLite transaction lock or Supabase optimistic lock.
@@ -87,6 +92,7 @@ class GenerationWorker:
         # FALLBACK 1: SQLite Transaction-Safe Claim
         if isinstance(supabase, SQLiteSupabaseClient):
             import sqlite3
+
             conn = sqlite3.connect(supabase.db_path)
             conn.row_factory = sqlite3.Row
             cursor = conn.cursor()
@@ -98,7 +104,7 @@ class GenerationWorker:
                     "WHERE status = 'pending' "
                     "AND (updated_at IS NULL OR updated_at <= ?) "
                     "ORDER BY created_at ASC LIMIT 1",
-                    (now_str,)
+                    (now_str,),
                 )
                 row = cursor.fetchone()
                 if row:
@@ -107,7 +113,7 @@ class GenerationWorker:
                         "UPDATE generation_job_items "
                         "SET status = 'processing', attempts = attempts + 1, updated_at = ? "
                         "WHERE id = ?",
-                        (now_str, item["id"])
+                        (now_str, item["id"]),
                     )
                     conn.commit()
                     item["status"] = "processing"
@@ -125,27 +131,33 @@ class GenerationWorker:
         # FALLBACK 2: Supabase (PostgreSQL) Optimistic Lock claim
         try:
             # Query next pending item
-            res = supabase.table("generation_job_items") \
-                .select("*") \
-                .eq("status", "pending") \
-                .lte("updated_at", now_str) \
-                .order("created_at") \
-                .limit(1) \
+            res = (
+                supabase.table("generation_job_items")
+                .select("*")
+                .eq("status", "pending")
+                .lte("updated_at", now_str)
+                .order("created_at")
+                .limit(1)
                 .execute()
-                
+            )
+
             if res.data:
                 item = res.data[0]
                 # Optimistic concurrency check: set status to processing where status is STILL pending
-                claim_res = supabase.table("generation_job_items") \
-                    .update({
-                        "status": "processing",
-                        "attempts": item["attempts"] + 1,
-                        "updated_at": now_str
-                    }) \
-                    .eq("id", item["id"]) \
-                    .eq("status", "pending") \
+                claim_res = (
+                    supabase.table("generation_job_items")
+                    .update(
+                        {
+                            "status": "processing",
+                            "attempts": item["attempts"] + 1,
+                            "updated_at": now_str,
+                        }
+                    )
+                    .eq("id", item["id"])
+                    .eq("status", "pending")
                     .execute()
-                    
+                )
+
                 if claim_res.data:
                     return claim_res.data[0]
         except Exception as e:
@@ -154,28 +166,37 @@ class GenerationWorker:
         return None
 
     @classmethod
-    def _process_job_item(cls, item: Dict[str, Any]):
+    def _process_job_item(cls, item: dict[str, Any]):
         """
         Runs context builder, SafeTemplateRenderer, Gemini Service and quality check for the item.
         """
         job_id = item["job_id"]
         lead_id = item["lead_id"]
-        
+
         # 1. Fetch Job and check if cancelled
-        job_res = supabase.table("generation_jobs").select("*").eq("id", job_id).execute()
+        job_res = (
+            supabase.table("generation_jobs").select("*").eq("id", job_id).execute()
+        )
         if not job_res.data:
             cls._mark_failed(item, "permanent", f"Job {job_id} not found")
             return
-            
+
         job = job_res.data[0]
         if job["status"] == "cancelled":
             cls._mark_cancelled(item)
             return
 
         # 2. Fetch Campaign
-        camp_res = supabase.table("campaigns").select("*").eq("id", job["campaign_id"]).execute()
+        camp_res = (
+            supabase.table("campaigns")
+            .select("*")
+            .eq("id", job["campaign_id"])
+            .execute()
+        )
         if not camp_res.data:
-            cls._mark_failed(item, "permanent", f"Campaign {job['campaign_id']} not found")
+            cls._mark_failed(
+                item, "permanent", f"Campaign {job['campaign_id']} not found"
+            )
             return
         campaign = camp_res.data[0]
 
@@ -190,7 +211,12 @@ class GenerationWorker:
         template_text = None
         prompt_ver_id = job.get("prompt_version")
         if prompt_ver_id:
-            pv_res = supabase.table("prompt_versions").select("*").eq("id", prompt_ver_id).execute()
+            pv_res = (
+                supabase.table("prompt_versions")
+                .select("*")
+                .eq("id", prompt_ver_id)
+                .execute()
+            )
             if pv_res.data:
                 template_text = pv_res.data[0]["template_text"]
 
@@ -199,27 +225,39 @@ class GenerationWorker:
             template_text = campaign.get("prompt_template_id") or ""
             # If it's a UUID/ID, query prompt_templates
             if len(template_text) < 50:
-                pt_res = supabase.table("prompt_templates").select("*").eq("id", template_text).execute()
+                pt_res = (
+                    supabase.table("prompt_templates")
+                    .select("*")
+                    .eq("id", template_text)
+                    .execute()
+                )
                 if pt_res.data:
                     template_text = pt_res.data[0]["template_text"]
 
         if not template_text or not template_text.strip():
-            cls._mark_failed(item, "permanent", "No email prompt template configuration found.")
+            cls._mark_failed(
+                item, "permanent", "No email prompt template configuration found."
+            )
             return
 
         # 5. Fetch sender settings
-        set_res = supabase.table("owner_settings").select("*").eq("user_id", job["user_id"]).execute()
+        set_res = (
+            supabase.table("owner_settings")
+            .select("*")
+            .eq("user_id", job["user_id"])
+            .execute()
+        )
         sender_settings = set_res.data[0] if set_res.data else {}
 
         # 6. Compile trusted context
         try:
             context_data = PersonalizationContextService.compile_context(
-                lead=lead,
-                campaign=campaign,
-                sender_settings=sender_settings
+                lead=lead, campaign=campaign, sender_settings=sender_settings
             )
         except Exception as e:
-            cls._mark_failed(item, "permanent", f"Personalization context compilation failed: {e}")
+            cls._mark_failed(
+                item, "permanent", f"Personalization context compilation failed: {e}"
+            )
             return
 
         # 7. Render Template Safely
@@ -228,7 +266,7 @@ class GenerationWorker:
             # (e.g. campaign.objective, sender.signature, first_name)
             # Find and construct research details
             research_summary = lead.get("research_summary") or ""
-            
+
             # Map variables to namespace structure
             renderer_context = {
                 "first_name": lead.get("first_name") or "there",
@@ -266,16 +304,18 @@ class GenerationWorker:
                 "sequence": {
                     "step_number": "1",
                     "previous_subject": "",
-                }
+                },
             }
 
-            rendered_prompt, _, missing_vars = SafeTemplateRenderer.render(template_text, renderer_context)
+            rendered_prompt, _, missing_vars = SafeTemplateRenderer.render(
+                template_text, renderer_context
+            )
             if missing_vars:
                 # Treat missing required variables as permanent failure
                 cls._mark_failed(
-                    item, 
-                    "permanent", 
-                    f"Template rendering failed. Missing variables: {', '.join(missing_vars)}"
+                    item,
+                    "permanent",
+                    f"Template rendering failed. Missing variables: {', '.join(missing_vars)}",
                 )
                 return
         except Exception as e:
@@ -286,12 +326,18 @@ class GenerationWorker:
         try:
             gemini = GeminiService()
             # Enforces fallback list & transient retry logic inside gemini_service
-            ai_res = gemini.generate_email_content(rendered_prompt, user_id=job["user_id"])
-            
+            ai_res = gemini.generate_email_content(
+                rendered_prompt, user_id=job["user_id"]
+            )
+
             # Check model usage for fallbacks
             configured_models = gemini.model_list
             used_model = ai_res.get("model_used")
-            if used_model and len(configured_models) > 0 and used_model != configured_models[0]:
+            if (
+                used_model
+                and len(configured_models) > 0
+                and used_model != configured_models[0]
+            ):
                 logger.warning(
                     f"⚠️ Fallback model trigger event occurred! Primary model failed. "
                     f"Fallback model '{used_model}' was used for item {item['id']}."
@@ -301,7 +347,11 @@ class GenerationWorker:
             subject = ai_res.get("subject")
             body = ai_res.get("body")
             if not subject or not body:
-                cls._mark_failed(item, "permanent", "Malformed AI output structure. Missing subject or body.")
+                cls._mark_failed(
+                    item,
+                    "permanent",
+                    "Malformed AI output structure. Missing subject or body.",
+                )
                 return
 
         except Exception as e:
@@ -315,7 +365,7 @@ class GenerationWorker:
                 or "overloaded" in err_str
                 or "quota" in err_str
             )
-            
+
             if is_transient and item["attempts"] < 3:
                 # Reschedule with exponential backoff & jitter
                 cls._reschedule_transient(item, e)
@@ -330,7 +380,7 @@ class GenerationWorker:
             eval_res = quality_checker.evaluate_draft(
                 subject, body, campaign.get("campaign_type") or "website", lead
             )
-            
+
             # Generate unique draft ID
             draft_id = str(uuid.uuid4())
             draft_payload = {
@@ -351,73 +401,87 @@ class GenerationWorker:
                 "campaign_id": campaign["id"],
                 "generation_job_id": job_id,
                 "created_at": datetime.datetime.utcnow().isoformat(),
-                "updated_at": datetime.datetime.utcnow().isoformat()
+                "updated_at": datetime.datetime.utcnow().isoformat(),
             }
-            
+
             supabase.table("email_drafts").insert(draft_payload).execute()
 
             # 10. Mark item completed
-            supabase.table("generation_job_items").update({
-                "status": "completed",
-                "resulting_draft_id": draft_id,
-                "error_message": None,
-                "error_type": None,
-                "updated_at": datetime.datetime.utcnow().isoformat()
-            }).eq("id", item["id"]).execute()
+            supabase.table("generation_job_items").update(
+                {
+                    "status": "completed",
+                    "resulting_draft_id": draft_id,
+                    "error_message": None,
+                    "error_type": None,
+                    "updated_at": datetime.datetime.utcnow().isoformat(),
+                }
+            ).eq("id", item["id"]).execute()
 
-            logger.info(f"Successfully processed item {item['id']} for lead {lead_id} (Draft: {draft_id})")
+            logger.info(
+                f"Successfully processed item {item['id']} for lead {lead_id} (Draft: {draft_id})"
+            )
 
         except Exception as e:
-            cls._mark_failed(item, "permanent", f"Failed to run quality checks or save draft: {e}")
+            cls._mark_failed(
+                item, "permanent", f"Failed to run quality checks or save draft: {e}"
+            )
 
         finally:
             GenerationJobService.sync_job_counts(job_id)
 
     @classmethod
-    def _reschedule_transient(cls, item: Dict[str, Any], exc: Exception):
+    def _reschedule_transient(cls, item: dict[str, Any], exc: Exception):
         """
         Schedules a retry of a transient failure with exponential backoff & jitter.
         """
         attempts = item["attempts"]
         # delay = 2^attempts + jitter
-        delay = (2 ** attempts) + random.uniform(0.5, 1.5)
+        delay = (2**attempts) + random.uniform(0.5, 1.5)
         eta = datetime.datetime.utcnow() + datetime.timedelta(seconds=delay)
-        
-        supabase.table("generation_job_items").update({
-            "status": "pending",
-            "error_type": "transient",
-            "error_message": f"Transient error: {exc}",
-            "updated_at": eta.isoformat()
-        }).eq("id", item["id"]).execute()
-        
+
+        supabase.table("generation_job_items").update(
+            {
+                "status": "pending",
+                "error_type": "transient",
+                "error_message": f"Transient error: {exc}",
+                "updated_at": eta.isoformat(),
+            }
+        ).eq("id", item["id"]).execute()
+
         logger.warning(
             f"Transient failure on item {item['id']}, scheduled retry #{attempts} in {delay:.2f}s."
         )
 
     @classmethod
-    def _mark_failed(cls, item: Dict[str, Any], error_type: str, error_message: str):
+    def _mark_failed(cls, item: dict[str, Any], error_type: str, error_message: str):
         """
         Marks an item as permanently failed (dead-lettering).
         """
-        supabase.table("generation_job_items").update({
-            "status": "failed",
-            "error_type": error_type,
-            "error_message": error_message,
-            "updated_at": datetime.datetime.utcnow().isoformat()
-        }).eq("id", item["id"]).execute()
-        
+        supabase.table("generation_job_items").update(
+            {
+                "status": "failed",
+                "error_type": error_type,
+                "error_message": error_message,
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            }
+        ).eq("id", item["id"]).execute()
+
         logger.error(f"Permanent failure on item {item['id']}: {error_message}")
         GenerationJobService.sync_job_counts(item["job_id"])
 
     @classmethod
-    def _mark_cancelled(cls, item: Dict[str, Any]):
+    def _mark_cancelled(cls, item: dict[str, Any]):
         """
         Marks an item as cancelled.
         """
-        supabase.table("generation_job_items").update({
-            "status": "cancelled",
-            "updated_at": datetime.datetime.utcnow().isoformat()
-        }).eq("id", item["id"]).execute()
-        
-        logger.info(f"Item {item['id']} marked as cancelled due to cancelled job header.")
+        supabase.table("generation_job_items").update(
+            {
+                "status": "cancelled",
+                "updated_at": datetime.datetime.utcnow().isoformat(),
+            }
+        ).eq("id", item["id"]).execute()
+
+        logger.info(
+            f"Item {item['id']} marked as cancelled due to cancelled job header."
+        )
         GenerationJobService.sync_job_counts(item["job_id"])

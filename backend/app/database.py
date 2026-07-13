@@ -113,7 +113,18 @@ class SQLiteQueryBuilder:
         if self.filters:
             for col, op, val in self.filters:
                 validate_identifier(col)
-                if op.lower() not in {"=", "!=", "<", ">", "<=", ">=", "like", "in", "is", "is not"}:
+                if op.lower() not in {
+                    "=",
+                    "!=",
+                    "<",
+                    ">",
+                    "<=",
+                    ">=",
+                    "like",
+                    "in",
+                    "is",
+                    "is not",
+                }:
                     raise ValueError(f"Invalid database operator: {op}")
 
         # Validate orders
@@ -125,7 +136,9 @@ class SQLiteQueryBuilder:
 
         # Validate payload columns for insert/update/upsert
         if self.payload:
-            payloads = self.payload if isinstance(self.payload, list) else [self.payload]
+            payloads = (
+                self.payload if isinstance(self.payload, list) else [self.payload]
+            )
             for p in payloads:
                 for col in p.keys():
                     validate_identifier(col)
@@ -768,14 +781,24 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "campaigns", "target_roles", "TEXT")
         self._add_column_if_missing(cursor, "campaigns", "countries", "TEXT")
         self._add_column_if_missing(cursor, "campaigns", "tags", "TEXT", "'[]'")
-        self._add_column_if_missing(cursor, "campaigns", "min_lead_fit_score", "INTEGER", "0")
-        self._add_column_if_missing(cursor, "campaigns", "selected_leads", "TEXT", "'[]'")
+        self._add_column_if_missing(
+            cursor, "campaigns", "min_lead_fit_score", "INTEGER", "0"
+        )
+        self._add_column_if_missing(
+            cursor, "campaigns", "selected_leads", "TEXT", "'[]'"
+        )
         self._add_column_if_missing(cursor, "campaigns", "language", "TEXT", "'en'")
         self._add_column_if_missing(cursor, "campaigns", "start_date", "TEXT")
-        self._add_column_if_missing(cursor, "campaigns", "prompt_config_snapshot", "TEXT", "'{}'")
-        self._add_column_if_missing(cursor, "campaigns", "min_quality_score", "REAL", "0.7")
+        self._add_column_if_missing(
+            cursor, "campaigns", "prompt_config_snapshot", "TEXT", "'{}'"
+        )
+        self._add_column_if_missing(
+            cursor, "campaigns", "min_quality_score", "REAL", "0.7"
+        )
         self._add_column_if_missing(cursor, "campaigns", "min_spam_risk", "REAL", "0.4")
-        self._add_column_if_missing(cursor, "campaigns", "min_personalization", "REAL", "0.6")
+        self._add_column_if_missing(
+            cursor, "campaigns", "min_personalization", "REAL", "0.6"
+        )
         self._add_column_if_missing(cursor, "campaigns", "min_clarity", "REAL", "0.7")
 
         # Alter Leads Table
@@ -797,31 +820,55 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "leads", "source_id", "TEXT")
 
         # Alter Prompt Versions Table
-        self._add_column_if_missing(cursor, "prompt_versions", "status", "TEXT", "'published'")
+        self._add_column_if_missing(
+            cursor, "prompt_versions", "status", "TEXT", "'published'"
+        )
         self._add_column_if_missing(cursor, "prompt_versions", "description", "TEXT")
         self._add_column_if_missing(cursor, "prompt_versions", "changelog", "TEXT")
         self._add_column_if_missing(cursor, "prompt_versions", "updated_at", "TEXT")
 
         # Alter Owner Settings Table
-        self._add_column_if_missing(cursor, "owner_settings", "offer_description", "TEXT")
-        self._add_column_if_missing(cursor, "owner_settings", "default_target_audience", "TEXT")
+        self._add_column_if_missing(
+            cursor, "owner_settings", "offer_description", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "owner_settings", "default_target_audience", "TEXT"
+        )
 
         # Alter Generation Jobs Table
         self._add_column_if_missing(cursor, "generation_jobs", "total", "INTEGER", "0")
         self._add_column_if_missing(cursor, "generation_jobs", "queued", "INTEGER", "0")
-        self._add_column_if_missing(cursor, "generation_jobs", "processing", "INTEGER", "0")
-        self._add_column_if_missing(cursor, "generation_jobs", "completed", "INTEGER", "0")
+        self._add_column_if_missing(
+            cursor, "generation_jobs", "processing", "INTEGER", "0"
+        )
+        self._add_column_if_missing(
+            cursor, "generation_jobs", "completed", "INTEGER", "0"
+        )
         self._add_column_if_missing(cursor, "generation_jobs", "failed", "INTEGER", "0")
-        self._add_column_if_missing(cursor, "generation_jobs", "cancelled", "INTEGER", "0")
-        self._add_column_if_missing(cursor, "generation_jobs", "model_configuration_snapshot", "TEXT", "'{}'")
+        self._add_column_if_missing(
+            cursor, "generation_jobs", "cancelled", "INTEGER", "0"
+        )
+        self._add_column_if_missing(
+            cursor, "generation_jobs", "model_configuration_snapshot", "TEXT", "'{}'"
+        )
         self._add_column_if_missing(cursor, "generation_jobs", "prompt_version", "TEXT")
 
         # Alter Generation Job Items Table
-        self._add_column_if_missing(cursor, "generation_job_items", "sequence_step_id", "TEXT")
-        self._add_column_if_missing(cursor, "generation_job_items", "attempts", "INTEGER", "0")
-        self._add_column_if_missing(cursor, "generation_job_items", "error_type", "TEXT")
-        self._add_column_if_missing(cursor, "generation_job_items", "resulting_draft_id", "TEXT")
-        self._add_column_if_missing(cursor, "generation_job_items", "idempotency_key", "TEXT")
+        self._add_column_if_missing(
+            cursor, "generation_job_items", "sequence_step_id", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "generation_job_items", "attempts", "INTEGER", "0"
+        )
+        self._add_column_if_missing(
+            cursor, "generation_job_items", "error_type", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "generation_job_items", "resulting_draft_id", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "generation_job_items", "idempotency_key", "TEXT"
+        )
 
         # Alter Email Drafts Table
         self._add_column_if_missing(cursor, "email_drafts", "campaign_id", "TEXT")
@@ -829,25 +876,51 @@ class SQLiteSupabaseClient:
 
         # Alter Sequence Steps Table
         self._add_column_if_missing(cursor, "sequence_steps", "name", "TEXT")
-        self._add_column_if_missing(cursor, "sequence_steps", "delay_amount", "INTEGER", "24")
-        self._add_column_if_missing(cursor, "sequence_steps", "delay_unit", "TEXT", "'hours'")
-        self._add_column_if_missing(cursor, "sequence_steps", "subject_template_version_id", "TEXT")
-        self._add_column_if_missing(cursor, "sequence_steps", "body_template_version_id", "TEXT")
-        self._add_column_if_missing(cursor, "sequence_steps", "custom_instructions", "TEXT")
-        self._add_column_if_missing(cursor, "sequence_steps", "require_manual_approval", "INTEGER", "1")
+        self._add_column_if_missing(
+            cursor, "sequence_steps", "delay_amount", "INTEGER", "24"
+        )
+        self._add_column_if_missing(
+            cursor, "sequence_steps", "delay_unit", "TEXT", "'hours'"
+        )
+        self._add_column_if_missing(
+            cursor, "sequence_steps", "subject_template_version_id", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "sequence_steps", "body_template_version_id", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "sequence_steps", "custom_instructions", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "sequence_steps", "require_manual_approval", "INTEGER", "1"
+        )
 
         # Alter Campaign Leads Table
-        self._add_column_if_missing(cursor, "campaign_leads", "next_step_scheduled_at", "TEXT")
+        self._add_column_if_missing(
+            cursor, "campaign_leads", "next_step_scheduled_at", "TEXT"
+        )
         self._add_column_if_missing(cursor, "campaign_leads", "last_sent_at", "TEXT")
         self._add_column_if_missing(cursor, "campaign_leads", "last_error", "TEXT")
-        self._add_column_if_missing(cursor, "campaign_leads", "exclude_weekends", "INTEGER", "1")
+        self._add_column_if_missing(
+            cursor, "campaign_leads", "exclude_weekends", "INTEGER", "1"
+        )
 
         # Alter Scheduled Emails Table
-        self._add_column_if_missing(cursor, "scheduled_emails", "sequence_step_id", "TEXT")
-        self._add_column_if_missing(cursor, "scheduled_emails", "attempts", "INTEGER", "0")
-        self._add_column_if_missing(cursor, "scheduled_emails", "idempotency_key", "TEXT")
-        self._add_column_if_missing(cursor, "scheduled_emails", "gmail_message_id", "TEXT")
-        self._add_column_if_missing(cursor, "scheduled_emails", "gmail_thread_id", "TEXT")
+        self._add_column_if_missing(
+            cursor, "scheduled_emails", "sequence_step_id", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "scheduled_emails", "attempts", "INTEGER", "0"
+        )
+        self._add_column_if_missing(
+            cursor, "scheduled_emails", "idempotency_key", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "scheduled_emails", "gmail_message_id", "TEXT"
+        )
+        self._add_column_if_missing(
+            cursor, "scheduled_emails", "gmail_thread_id", "TEXT"
+        )
         self._add_column_if_missing(cursor, "scheduled_emails", "last_error", "TEXT")
         self._add_column_if_missing(cursor, "scheduled_emails", "scheduled_for", "TEXT")
 
@@ -856,17 +929,25 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "reply_events", "confidence", "REAL")
         self._add_column_if_missing(cursor, "reply_events", "rule_model_used", "TEXT")
         self._add_column_if_missing(cursor, "reply_events", "explanation", "TEXT")
-        self._add_column_if_missing(cursor, "reply_events", "manual_override", "INTEGER", "0")
+        self._add_column_if_missing(
+            cursor, "reply_events", "manual_override", "INTEGER", "0"
+        )
 
         # Alter Integration Connections Table
-        self._add_column_if_missing(cursor, "integration_connections", "last_history_id", "TEXT")
+        self._add_column_if_missing(
+            cursor, "integration_connections", "last_history_id", "TEXT"
+        )
 
         # Alter Campaigns Table
-        self._add_column_if_missing(cursor, "campaigns", "ooo_behavior", "TEXT", "'ignore'")
+        self._add_column_if_missing(
+            cursor, "campaigns", "ooo_behavior", "TEXT", "'ignore'"
+        )
         self._add_column_if_missing(cursor, "campaigns", "parent_campaign_id", "TEXT")
 
         # Alter Experiment Variants Table
-        self._add_column_if_missing(cursor, "experiment_variants", "prompt_template_version_id", "TEXT")
+        self._add_column_if_missing(
+            cursor, "experiment_variants", "prompt_template_version_id", "TEXT"
+        )
 
         # Alter Email Drafts Table
         self._add_column_if_missing(cursor, "email_drafts", "variant_id", "TEXT")
@@ -913,13 +994,15 @@ class SQLiteSupabaseClient:
                     if c_type == "erp":
                         new_objective = "Introduce an ERP consulting service and propose schedule systems"
                     elif c_type == "website":
-                        new_objective = "Propose website development and design improvements"
+                        new_objective = (
+                            "Propose website development and design improvements"
+                        )
                     else:
                         new_objective = "Introduce general operational agency services"
-                
+
                 cursor.execute(
                     "UPDATE campaigns SET campaign_type = 'generic', objective = ? WHERE id = ?",
-                    (new_objective, c_id)
+                    (new_objective, c_id),
                 )
 
         # 2. Backfill prompt versions
@@ -965,6 +1048,21 @@ class SQLiteSupabaseClient:
             ip_address TEXT,
             timestamp TEXT NOT NULL
         )""")
+
+        # Performance optimization indexes
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_leads_user_id ON leads(user_id)")
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_campaigns_user_id ON campaigns(user_id)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scheduled_emails_status ON scheduled_emails(status)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_scheduled_emails_scheduled_for ON scheduled_emails(scheduled_for)"
+        )
+        cursor.execute(
+            "CREATE INDEX IF NOT EXISTS idx_campaign_leads_campaign_id ON campaign_leads(campaign_id)"
+        )
 
         conn.commit()
         conn.close()
