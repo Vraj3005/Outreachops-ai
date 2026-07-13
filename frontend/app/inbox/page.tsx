@@ -192,11 +192,20 @@ export default function InboxPage() {
                   <div className="text-xs font-semibold text-indigo-600 truncate">{reply.subject}</div>
                   
                   <div className="p-3 bg-zinc-50 border border-zinc-100 rounded-lg text-zinc-600 text-xs italic font-serif leading-relaxed relative max-w-3xl">
-                    "{reply.body}"
+                    &ldquo;{reply.body}&rdquo;
                     <span className="absolute bottom-1 right-2 text-[8px] text-zinc-400 font-mono not-italic uppercase tracking-widest flex items-center gap-0.5">
                       <Shield className="w-2 h-2 text-emerald-500" /> PII-Redacted
                     </span>
                   </div>
+
+                  {reply.explanation && (
+                    <div className="p-4 bg-indigo-50/30 border border-indigo-100/60 rounded-lg text-zinc-800 text-xs max-w-3xl space-y-1">
+                      <div className="font-bold text-indigo-900 flex items-center gap-1.5">
+                        <Shield className="w-3.5 h-3.5 text-indigo-500" /> Suggested Response Draft
+                      </div>
+                      <p className="font-mono whitespace-pre-line leading-relaxed text-zinc-700">{reply.explanation}</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* Right: Classification parameters and Override selector */}

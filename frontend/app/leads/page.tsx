@@ -30,6 +30,11 @@ interface Lead {
   fit_score?: number | null;
   fit_score_reasons?: string[] | null;
   email_validation_status?: string | null;
+  research_status?: string | null;
+  research_summary?: string | null;
+  research_sources?: string[] | null;
+  locked_facts?: string[] | null;
+  personalization_context?: any;
   created_at: string;
 }
 
@@ -1783,7 +1788,7 @@ export default function LeadsPage() {
                   </button>
                 </div>
               </div>
-            )})}
+            )}
           </div>
         </div>
       )}

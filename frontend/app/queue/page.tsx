@@ -21,6 +21,7 @@ interface ScheduledEmail {
   last_error?: string;
   gmail_message_id?: string;
   gmail_thread_id?: string;
+  sequence_step_id?: string | number | null;
   created_at: string;
   updated_at: string;
 }

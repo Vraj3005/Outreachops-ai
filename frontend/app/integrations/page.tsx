@@ -73,7 +73,7 @@ export default function IntegrationsPage() {
 
   // Connect Gmail OAuth
   const handleConnectGmail = async () => {
-    setGmailStatus(prev => ({ ...prev, status: "testing" }));
+    setGmailStatus((prev: any) => ({ ...prev, status: "testing" }));
     toast("Starting OAuth redirection flow...", "info");
     try {
       const res = await fetch(`${API_URL}/api/v1/integrations/gmail/connect`, { method: "POST" });

@@ -114,13 +114,15 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
   const navItems = [
     { name: "Dashboard", path: "/dashboard", icon: BarChart3 },
-    { name: "Leads Database", path: "/leads", icon: Database },
-    { name: "Inbox Outcomes", path: "/inbox", icon: Inbox },
-    { name: "Email Drafts", path: "/drafts", icon: Mail },
+    { name: "Imports", path: "/imports", icon: Database },
+    { name: "Leads", path: "/leads", icon: Database },
     { name: "Campaigns", path: "/campaigns", icon: Send },
-    { name: "Outbox Queue", path: "/queue", icon: Clock },
-    { name: "Prompt Studio", path: "/prompt-studio", icon: Code },
+    { name: "Sequences", path: "/sequences", icon: Sparkles },
+    { name: "Drafts", path: "/drafts", icon: Mail },
+    { name: "Send Queue", path: "/queue", icon: Clock },
+    { name: "Replies", path: "/inbox", icon: Inbox },
     { name: "Analytics", path: "/analytics", icon: BarChart3 },
+    { name: "Prompt Studio", path: "/prompt-studio", icon: Code },
     { name: "Integrations", path: "/integrations", icon: RefreshCw },
     { name: "Settings", path: "/settings", icon: Settings },
   ];

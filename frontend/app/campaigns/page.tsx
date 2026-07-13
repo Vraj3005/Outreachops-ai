@@ -448,7 +448,7 @@ export default function CampaignsPage() {
             body: JSON.stringify({ steps: wizardSteps })
           });
           if (!stepsRes.ok) {
-            toast("Campaign created but failed to save custom sequence steps.", "warning");
+            toast("Campaign created but failed to save custom sequence steps.", "info");
           }
         } catch (stepErr) {
           console.error("Sequence steps save failure:", stepErr);
@@ -691,7 +691,7 @@ export default function CampaignsPage() {
                     </div>
                     {step.custom_instructions && (
                       <div className="text-[10px] text-zinc-400 italic font-semibold">
-                        "{step.custom_instructions}"
+                        &ldquo;{step.custom_instructions}&rdquo;
                       </div>
                     )}
                     <div className="text-[9px] text-zinc-500 flex items-center gap-1.5 mt-1 font-semibold">
