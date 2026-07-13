@@ -54,6 +54,12 @@ class SequenceCron:
         if not supabase:
             return
 
+        from app.services.gmail_sync_service import GmailSyncService
+        try:
+            GmailSyncService.sync_all_connections()
+        except Exception as e:
+            logger.error(f"Gmail sync execution failed in cron tick: {e}")
+
         now_str = datetime.datetime.now(datetime.UTC).isoformat()
 
         # Fetch all active campaigns

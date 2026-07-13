@@ -598,6 +598,11 @@ class SQLiteSupabaseClient:
             subject TEXT,
             body TEXT,
             sentiment TEXT DEFAULT 'neutral',
+            category TEXT,
+            confidence REAL,
+            rule_model_used TEXT,
+            explanation TEXT,
+            manual_override INTEGER DEFAULT 0,
             replied_at TEXT DEFAULT CURRENT_TIMESTAMP,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )""")
@@ -777,6 +782,19 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "scheduled_emails", "gmail_thread_id", "TEXT")
         self._add_column_if_missing(cursor, "scheduled_emails", "last_error", "TEXT")
         self._add_column_if_missing(cursor, "scheduled_emails", "scheduled_for", "TEXT")
+
+        # Alter Reply Events Table
+        self._add_column_if_missing(cursor, "reply_events", "category", "TEXT")
+        self._add_column_if_missing(cursor, "reply_events", "confidence", "REAL")
+        self._add_column_if_missing(cursor, "reply_events", "rule_model_used", "TEXT")
+        self._add_column_if_missing(cursor, "reply_events", "explanation", "TEXT")
+        self._add_column_if_missing(cursor, "reply_events", "manual_override", "INTEGER", "0")
+
+        # Alter Integration Connections Table
+        self._add_column_if_missing(cursor, "integration_connections", "last_history_id", "TEXT")
+
+        # Alter Campaigns Table
+        self._add_column_if_missing(cursor, "campaigns", "ooo_behavior", "TEXT", "'ignore'")
 
         # --- V2 DATA MIGRATIONS ---
         # 1. Migrate leads website_pain_points & erp_approach to custom_fields

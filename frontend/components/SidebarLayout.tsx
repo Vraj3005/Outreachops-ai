@@ -4,7 +4,7 @@ import React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { 
   Sparkles, RefreshCw, BarChart3, 
-  Settings, Database, Mail, LogOut, Code, Send, Clock
+  Settings, Database, Mail, LogOut, Code, Send, Clock, Inbox
 } from "lucide-react";
 import { useToast } from "./Toast";
 import { supabase } from "@/lib/supabase";
@@ -115,6 +115,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const navItems = [
     { name: "Dashboard", path: "/dashboard", icon: BarChart3 },
     { name: "Leads Database", path: "/leads", icon: Database },
+    { name: "Inbox Outcomes", path: "/inbox", icon: Inbox },
     { name: "Email Drafts", path: "/drafts", icon: Mail },
     { name: "Campaigns", path: "/campaigns", icon: Send },
     { name: "Outbox Queue", path: "/queue", icon: Clock },

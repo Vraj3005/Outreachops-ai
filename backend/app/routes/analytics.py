@@ -1,7 +1,7 @@
 import logging
 from datetime import datetime, time, timedelta
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from app.database import supabase
 from app.utils.auth import require_owner
@@ -250,3 +250,69 @@ async def get_quota_details(owner: dict = Depends(require_owner)):
         "remaining_today": max(0, daily_limit - sent_today),
         "gmail_capacity_remaining": max(0, gmail_capacity - sent_today),
     }
+
+
+@router.get("/replies")
+async def get_reply_events(owner: dict = Depends(require_owner)):
+    """
+    Returns list of all received reply events.
+    """
+    try:
+        res = supabase.table("reply_events")\
+            .select("*")\
+            .eq("user_id", owner["id"])\
+            .order("replied_at", desc=True)\
+            .execute()
+        return res.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/replies/{id}/override")
+async def override_reply_classification(
+    id: str,
+    payload: dict,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Manually overrides the AI/rule classification category of a received email.
+    """
+    category = payload.get("category")
+    if not category:
+        raise HTTPException(status_code=400, detail="Category parameter is required")
+    try:
+        rep_res = supabase.table("reply_events").select("*").eq("id", id).execute()
+        if not rep_res.data:
+            raise HTTPException(status_code=404, detail="Reply event not found")
+        rep = rep_res.data[0]
+
+        supabase.table("reply_events").update({
+            "category": category,
+            "manual_override": 1,
+            "rule_model_used": "manual_override"
+        }).eq("id", id).execute()
+
+        from app.services.reply_classification_service import ReplyClassificationService
+        ReplyClassificationService._apply_sequence_stopping(
+            user_id=owner["id"],
+            campaign_id=rep["campaign_id"],
+            lead_id=rep["lead_id"],
+            category=category
+        )
+
+        return {"status": "success", "message": "Reply category overridden successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync-replies")
+async def trigger_manual_reply_sync(owner: dict = Depends(require_owner)):
+    """
+    Triggers manual sync pull of Gmail inbox history events.
+    """
+    from app.services.gmail_sync_service import GmailSyncService
+    try:
+        GmailSyncService.sync_user_replies(owner["id"])
+        return {"status": "success", "message": "Gmail reply sync completed successfully."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
