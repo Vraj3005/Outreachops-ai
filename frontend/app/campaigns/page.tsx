@@ -127,6 +127,15 @@ export default function CampaignsPage() {
   const [wizardPromptId, setWizardPromptId] = useState("");
   
   const [wizardSequenceId, setWizardSequenceId] = useState("");
+  const [wizardSteps, setWizardSteps] = useState([
+    { name: "Initial Outreach", step_number: 1, delay_amount: 0, delay_unit: "hours", require_manual_approval: true, custom_instructions: "" },
+    { name: "Follow-up", step_number: 2, delay_amount: 3, delay_unit: "days", require_manual_approval: true, custom_instructions: "" },
+    { name: "Final Follow-up", step_number: 3, delay_amount: 7, delay_unit: "days", require_manual_approval: true, custom_instructions: "" }
+  ]);
+  
+  const [activeSequenceSteps, setActiveSequenceSteps] = useState<any[]>([]);
+  const [activeTimeline, setActiveTimeline] = useState<any[]>([]);
+  const [promptVersions, setPromptVersions] = useState<any[]>([]);
   
   const [wizardTimezone, setWizardTimezone] = useState("UTC");
   const [wizardDailyLimit, setWizardDailyLimit] = useState(50);
@@ -188,9 +197,56 @@ export default function CampaignsPage() {
     }
   };
 
+  const fetchCampaignSequenceAndTimeline = async (campaignId: string) => {
+    try {
+      const seqRes = await fetch(`${API_URL}/api/v1/campaigns/${campaignId}/sequence`);
+      if (seqRes.ok) {
+        const seqData = await seqRes.json();
+        setActiveSequenceSteps(seqData.steps || []);
+      }
+      const timelineRes = await fetch(`${API_URL}/api/v1/campaigns/${campaignId}/timeline`);
+      if (timelineRes.ok) {
+        const timelineData = await timelineRes.json();
+        setActiveTimeline(timelineData || []);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchPromptVersions = async () => {
+    try {
+      const promptsRes = await fetch(`${API_URL}/api/v1/prompts`);
+      if (promptsRes.ok) {
+        const promptsData = await promptsRes.json();
+        let versions: any[] = [];
+        for (const pt of promptsData) {
+          const vRes = await fetch(`${API_URL}/api/v1/prompts/${pt.id}/versions`);
+          if (vRes.ok) {
+            const vData = await vRes.json();
+            versions = [...versions, ...vData.map((v: any) => ({ ...v, template_name: pt.name }))];
+          }
+        }
+        setPromptVersions(versions);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   useEffect(() => {
     fetchCampaignsAndTelemetry();
+    fetchPromptVersions();
   }, []);
+
+  useEffect(() => {
+    if (activeCampaign?.id) {
+      fetchCampaignSequenceAndTimeline(activeCampaign.id);
+    } else {
+      setActiveSequenceSteps([]);
+      setActiveTimeline([]);
+    }
+  }, [activeCampaign?.id]);
 
   const handleSendAllApproved = async () => {
     if (telemetry.approved_drafts === 0) {
@@ -382,6 +438,22 @@ export default function CampaignsPage() {
       });
 
       if (res.ok) {
+        const createdCampaign = await res.json();
+        
+        // Save sequence steps configuration
+        try {
+          const stepsRes = await fetch(`${API_URL}/api/v1/campaigns/${createdCampaign.id}/sequence/steps`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ steps: wizardSteps })
+          });
+          if (!stepsRes.ok) {
+            toast("Campaign created but failed to save custom sequence steps.", "warning");
+          }
+        } catch (stepErr) {
+          console.error("Sequence steps save failure:", stepErr);
+        }
+
         toast(`Campaign '${wizardName}' created successfully!`, "success");
         setShowWizard(false);
         setWizardStep(1);
@@ -596,6 +668,85 @@ export default function CampaignsPage() {
             )}
           </div>
         </div>
+
+        {/* Active Sequence Configuration Card */}
+        {activeCampaign && (
+          <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
+            <div>
+              <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider">Sequence Steps ({activeSequenceSteps.length})</h3>
+              <p className="text-[10px] text-zinc-500 mt-0.5">Custom follow-up steps for this campaign</p>
+            </div>
+            
+            {activeSequenceSteps.length === 0 ? (
+              <p className="text-[10px] text-zinc-400 font-semibold italic">No sequence configured or loading...</p>
+            ) : (
+              <div className="space-y-3">
+                {activeSequenceSteps.map((step, idx) => (
+                  <div key={idx} className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg flex flex-col gap-1 text-[11px]">
+                    <div className="flex justify-between items-center font-bold text-zinc-800">
+                      <span>{step.step_number}. {step.name}</span>
+                      <span className="text-[8px] uppercase tracking-widest px-2 py-0.5 rounded-full bg-zinc-200 text-zinc-700 font-extrabold">
+                        {step.delay_amount} {step.delay_unit} delay
+                      </span>
+                    </div>
+                    {step.custom_instructions && (
+                      <div className="text-[10px] text-zinc-400 italic font-semibold">
+                        "{step.custom_instructions}"
+                      </div>
+                    )}
+                    <div className="text-[9px] text-zinc-500 flex items-center gap-1.5 mt-1 font-semibold">
+                      <span className={`w-1.5 h-1.5 rounded-full ${step.require_manual_approval ? 'bg-amber-400' : 'bg-emerald-400'}`}></span>
+                      {step.require_manual_approval ? 'Requires approval before send' : 'Pre-approved / Auto-send'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Campaign Lead Timeline Progress Card */}
+        {activeCampaign && (
+          <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
+            <div>
+              <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider">Campaign Timeline Progress</h3>
+              <p className="text-[10px] text-zinc-500 mt-0.5">Detailed step status of enrolled leads</p>
+            </div>
+
+            {activeTimeline.length === 0 ? (
+              <p className="text-[10px] text-zinc-400 font-semibold italic text-center py-4">No prospects enrolled in sequence yet.</p>
+            ) : (
+              <div className="space-y-2 max-h-[40vh] overflow-y-auto pr-1">
+                {activeTimeline.map((item, idx) => (
+                  <div key={idx} className="p-3 bg-zinc-50 border border-zinc-200 rounded-lg flex items-center justify-between text-xs">
+                    <div className="space-y-0.5">
+                      <div className="font-bold text-zinc-800 text-[11px] truncate max-w-[135px]">
+                        {item.lead_id}
+                      </div>
+                      <div className="text-[10px] text-zinc-500 font-semibold">
+                        Current Step: <span className="font-bold text-zinc-700">{item.current_sequence_step}</span>
+                      </div>
+                    </div>
+
+                    <span className={`text-[9px] uppercase tracking-wider px-2 py-0.5 rounded-full font-bold border ${
+                      item.status === 'sent' ? 'bg-emerald-50 border-emerald-100 text-emerald-700' :
+                      item.status === 'scheduled' ? 'bg-indigo-50 border-indigo-100 text-indigo-700' :
+                      item.status === 'awaiting_approval' ? 'bg-amber-50 border-amber-100 text-amber-700 animate-pulse' :
+                      item.status === 'awaiting_generation' ? 'bg-blue-50 border-blue-100 text-blue-700 animate-pulse' :
+                      item.status === 'waiting' ? 'bg-purple-50 border-purple-100 text-purple-700' :
+                      item.status === 'replied' ? 'bg-emerald-500 border-emerald-600 text-white' :
+                      item.status === 'stopped' ? 'bg-rose-50 border-rose-100 text-rose-700' :
+                      item.status === 'completed' ? 'bg-teal-50 border-teal-100 text-teal-700 font-extrabold' :
+                      'bg-zinc-100 border-zinc-200 text-zinc-500'
+                    }`}>
+                      {item.status}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
       </div>
 
@@ -899,22 +1050,141 @@ export default function CampaignsPage() {
                 </div>
               )}
 
-              {/* STEP 5: Sequence selection */}
+              {/* STEP 5: Sequence Steps Editor */}
               {wizardStep === 5 && (
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Sequence Template ID (Optional)</label>
-                    <input 
-                      type="text"
-                      value={wizardSequenceId}
-                      onChange={e => setWizardSequenceId(e.target.value)}
-                      placeholder="e.g. seq-123-abc"
-                      className="w-full px-3 py-2 rounded-lg bg-zinc-50 border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950 transition-all font-mono"
-                    />
-                    <p className="text-[10px] text-zinc-400 mt-1 flex items-center gap-1">
-                      <Info className="w-3.5 h-3.5" />
-                      Select or create sequence steps to dispatch multiple outreach templates sequentially.
-                    </p>
+                <div className="space-y-4 max-h-[50vh] overflow-y-auto pr-1">
+                  <div className="flex justify-between items-center border-b border-zinc-100 pb-2">
+                    <div>
+                      <h4 className="text-xs font-bold text-zinc-800">Sequence Steps Configuration</h4>
+                      <p className="text-[10px] text-zinc-500">Configure ordered delays, template overrides, and manual approval gates.</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setWizardSteps(prev => [
+                          ...prev,
+                          {
+                            name: `Follow-up Step ${prev.length + 1}`,
+                            step_number: prev.length + 1,
+                            delay_amount: 3,
+                            delay_unit: "days",
+                            require_manual_approval: true,
+                            custom_instructions: ""
+                          }
+                        ])
+                      }}
+                      className="px-2.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-[10px] font-bold flex items-center gap-1 transition-all shadow-sm"
+                    >
+                      <Plus className="w-3 h-3" />
+                      Add Step
+                    </button>
+                  </div>
+
+                  <div className="space-y-4">
+                    {wizardSteps.map((step, idx) => (
+                      <div key={idx} className="p-4 rounded-xl border border-zinc-200 bg-zinc-50/50 space-y-3 relative text-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] uppercase font-black text-zinc-400 bg-zinc-100 px-2 py-0.5 rounded">
+                            Step {step.step_number}
+                          </span>
+                          
+                          {idx > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const filtered = wizardSteps.filter((_, sIdx) => sIdx !== idx);
+                                const mapped = filtered.map((s, sIdx) => ({ ...s, step_number: sIdx + 1 }));
+                                setWizardSteps(mapped);
+                              }}
+                              className="text-rose-500 hover:text-rose-700 text-[10px] font-bold"
+                            >
+                              Delete Step
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="text-[9px] uppercase font-bold text-zinc-400 block mb-1">Step Name</label>
+                            <input
+                              type="text"
+                              value={step.name}
+                              onChange={e => {
+                                const updated = [...wizardSteps];
+                                updated[idx].name = e.target.value;
+                                setWizardSteps(updated);
+                              }}
+                              placeholder="e.g. Follow-up 1"
+                              className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-semibold bg-white text-zinc-800 focus:outline-none"
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-zinc-400 block mb-1">Delay Amount</label>
+                              <input
+                                type="number"
+                                value={step.delay_amount}
+                                onChange={e => {
+                                  const updated = [...wizardSteps];
+                                  updated[idx].delay_amount = parseInt(e.target.value) || 0;
+                                  setWizardSteps(updated);
+                                }}
+                                className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-mono bg-white text-zinc-800 focus:outline-none"
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] uppercase font-bold text-zinc-400 block mb-1">Delay Unit</label>
+                              <select
+                                value={step.delay_unit}
+                                onChange={e => {
+                                  const updated = [...wizardSteps];
+                                  updated[idx].delay_unit = e.target.value;
+                                  setWizardSteps(updated);
+                                }}
+                                className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs bg-white text-zinc-800 focus:outline-none cursor-pointer"
+                              >
+                                <option value="minutes">Minutes (Testing)</option>
+                                <option value="hours">Hours</option>
+                                <option value="days">Days</option>
+                              </select>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="text-[9px] uppercase font-bold text-zinc-400 block mb-1">Custom instructions for step</label>
+                          <textarea
+                            value={step.custom_instructions}
+                            onChange={e => {
+                              const updated = [...wizardSteps];
+                              updated[idx].custom_instructions = e.target.value;
+                              setWizardSteps(updated);
+                            }}
+                            placeholder="e.g. keep it under 3 sentences, ask if they received my previous message..."
+                            rows={2}
+                            className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-semibold bg-white text-zinc-800 focus:outline-none"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <input
+                            type="checkbox"
+                            id={`manual-${idx}`}
+                            checked={step.require_manual_approval}
+                            onChange={e => {
+                              const updated = [...wizardSteps];
+                              updated[idx].require_manual_approval = e.target.checked;
+                              setWizardSteps(updated);
+                            }}
+                            className="rounded text-zinc-950 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                          />
+                          <label htmlFor={`manual-${idx}`} className="text-[10px] text-zinc-600 select-none cursor-pointer">
+                            Require manual human review & approval before sending
+                          </label>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               )}

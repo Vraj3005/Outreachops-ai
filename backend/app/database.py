@@ -747,6 +747,21 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(cursor, "email_drafts", "campaign_id", "TEXT")
         self._add_column_if_missing(cursor, "email_drafts", "generation_job_id", "TEXT")
 
+        # Alter Sequence Steps Table
+        self._add_column_if_missing(cursor, "sequence_steps", "name", "TEXT")
+        self._add_column_if_missing(cursor, "sequence_steps", "delay_amount", "INTEGER", "24")
+        self._add_column_if_missing(cursor, "sequence_steps", "delay_unit", "TEXT", "'hours'")
+        self._add_column_if_missing(cursor, "sequence_steps", "subject_template_version_id", "TEXT")
+        self._add_column_if_missing(cursor, "sequence_steps", "body_template_version_id", "TEXT")
+        self._add_column_if_missing(cursor, "sequence_steps", "custom_instructions", "TEXT")
+        self._add_column_if_missing(cursor, "sequence_steps", "require_manual_approval", "INTEGER", "1")
+
+        # Alter Campaign Leads Table
+        self._add_column_if_missing(cursor, "campaign_leads", "next_step_scheduled_at", "TEXT")
+        self._add_column_if_missing(cursor, "campaign_leads", "last_sent_at", "TEXT")
+        self._add_column_if_missing(cursor, "campaign_leads", "last_error", "TEXT")
+        self._add_column_if_missing(cursor, "campaign_leads", "exclude_weekends", "INTEGER", "1")
+
         # --- V2 DATA MIGRATIONS ---
         # 1. Migrate leads website_pain_points & erp_approach to custom_fields
         cursor.execute(

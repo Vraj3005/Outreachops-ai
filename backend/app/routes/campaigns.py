@@ -517,3 +517,155 @@ async def resume_stalled_job(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+from pydantic import BaseModel
+import uuid
+
+class SequenceStepSave(BaseModel):
+    name: str
+    step_number: int
+    delay_amount: int
+    delay_unit: str
+    body_template_version_id: Optional[str] = None
+    subject_template_version_id: Optional[str] = None
+    custom_instructions: Optional[str] = None
+    require_manual_approval: bool = True
+
+class SaveSequenceStepsRequest(BaseModel):
+    steps: list[SequenceStepSave]
+
+class EnrollLeadsRequest(BaseModel):
+    lead_ids: list[str]
+
+
+@router.get("/{id}/sequence")
+async def get_campaign_sequence(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Returns sequence steps details for the campaign.
+    """
+    from app.services.sequence_service import SequenceService
+    try:
+        seq_id = SequenceService.get_or_create_default_sequence(id, owner["id"])
+        seq_res = supabase.table("sequences").select("*").eq("id", seq_id).execute()
+        steps_res = supabase.table("sequence_steps").select("*").eq("sequence_id", seq_id).order("step_number").execute()
+        return {
+            "sequence": seq_res.data[0] if seq_res.data else {},
+            "steps": steps_res.data or []
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{id}/sequence/steps")
+async def save_campaign_sequence_steps(
+    id: str,
+    payload: SaveSequenceStepsRequest,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Updates the sequence steps for the campaign.
+    """
+    from app.services.sequence_service import SequenceService
+    try:
+        seq_id = SequenceService.get_or_create_default_sequence(id, owner["id"])
+        
+        # Delete old steps
+        supabase.table("sequence_steps").delete().eq("sequence_id", seq_id).execute()
+        
+        # Insert new steps
+        insert_payloads = []
+        for step in payload.steps:
+            insert_payloads.append({
+                "id": str(uuid.uuid4()),
+                "sequence_id": seq_id,
+                "step_number": step.step_number,
+                "name": step.name,
+                "delay_amount": step.delay_amount,
+                "delay_unit": step.delay_unit,
+                "body_template_version_id": step.body_template_version_id,
+                "subject_template_version_id": step.subject_template_version_id,
+                "custom_instructions": step.custom_instructions,
+                "require_manual_approval": 1 if step.require_manual_approval else 0
+            })
+        
+        if insert_payloads:
+            supabase.table("sequence_steps").insert(insert_payloads).execute()
+            
+        return {"status": "success", "steps_count": len(insert_payloads)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{id}/timeline")
+async def get_campaign_leads_timeline(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Returns progress stats of all leads enrolled in the campaign.
+    """
+    try:
+        leads_res = supabase.table("campaign_leads").select("*").eq("campaign_id", id).execute()
+        return leads_res.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{id}/leads/enroll")
+async def enroll_leads_in_sequence(
+    id: str,
+    payload: EnrollLeadsRequest,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Enrolls a list of lead IDs in the campaign sequence.
+    """
+    from app.services.sequence_service import SequenceService
+    results = []
+    for lead_id in payload.lead_ids:
+        try:
+            res = SequenceService.enroll_lead(id, lead_id, owner["id"])
+            results.append({"lead_id": lead_id, "status": "success", "result": res})
+        except Exception as e:
+            results.append({"lead_id": lead_id, "status": "error", "message": str(e)})
+    return results
+
+
+@router.post("/{id}/leads/pause")
+async def pause_sequence_processing(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Pauses campaign sequence processing by transitioning running states to paused stop status.
+    """
+    try:
+        # Update campaign lead statuses to stopped
+        supabase.table("campaign_leads").update({
+            "status": "stopped",
+            "stopped_reason": "Campaign paused"
+        }).eq("campaign_id", id).in_("status", ["awaiting_generation", "awaiting_approval", "scheduled", "waiting"]).execute()
+        
+        return {"status": "success", "message": "Campaign leads sequence paused"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{id}/leads/resume")
+async def resume_sequence_processing(
+    id: str,
+    owner: dict = Depends(require_owner)
+):
+    """
+    Resumes sequence processing for paused campaign leads.
+    """
+    from app.services.sequence_service import SequenceService
+    try:
+        SequenceService.recalculate_paused_campaign_leads(id)
+        return {"status": "success", "message": "Resumed sequence calculations successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+

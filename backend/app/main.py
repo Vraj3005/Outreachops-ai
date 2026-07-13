@@ -45,11 +45,14 @@ async def lifespan(app: FastAPI):
     init_db()
     
     from app.services.generation_worker import GenerationWorker
+    from app.services.sequence_cron import SequenceCron
     GenerationWorker.start()
+    SequenceCron.start()
     
     yield
     # Shutdown actions
     GenerationWorker.stop()
+    SequenceCron.stop()
 
 
 app = FastAPI(
