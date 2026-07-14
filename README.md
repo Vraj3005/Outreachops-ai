@@ -79,7 +79,7 @@ outreachops-ai/
    ```
 3. Copy environment configuration:
    ```bash
-   cp .env.example .env
+   cp .env.example .env     
    ```
 4. Set up your `.env` file with Supabase URL, keys, and toggle `DEMO_MODE=true` to run without API tokens.
 5. Launch the FastAPI server:
