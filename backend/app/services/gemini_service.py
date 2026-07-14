@@ -44,6 +44,8 @@ class GeminiService:
             logger.warning(f"Error loading Gemini credentials from DB: {e}")
         return {}
 
+    _clients: dict[str, genai.Client] = {}
+
     def _get_client(self, user_id: str = None) -> genai.Client:
         db_cfg = self._get_db_config(user_id) if user_id else {}
         api_key = db_cfg.get("api_key") or self.api_key
@@ -52,13 +54,16 @@ class GeminiService:
             raise GeminiQuotaError(
                 message="Gemini API Key is not configured. Add GEMINI_API_KEY to environment or configure it in settings."
             )
-        try:
-            return genai.Client(api_key=api_key, http_options={"timeout": 30.0})
-        except Exception as e:
-            logger.error(f"Failed to initialize Gemini GenAI Client: {e}")
-            raise GeminiQuotaError(
-                message="Could not initialize Gemini Client", details={"error": str(e)}
-            )
+        if api_key not in self._clients:
+            try:
+                self._clients[api_key] = genai.Client(api_key=api_key)
+            except Exception as e:
+                logger.error(f"Failed to initialize Gemini GenAI Client: {e}")
+                raise GeminiQuotaError(
+                    message="Could not initialize Gemini Client",
+                    details={"error": str(e)},
+                )
+        return self._clients[api_key]
 
     def parse_email(self, raw_text: str) -> dict[str, str]:
         """

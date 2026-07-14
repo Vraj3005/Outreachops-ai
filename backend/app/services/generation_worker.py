@@ -477,7 +477,7 @@ class GenerationWorker:
                 "spam_risk_score": eval_res["scores"]["spam_risk_score"],
                 "personalization_score": eval_res["scores"]["personalization_score"],
                 "clarity_score": eval_res["scores"]["clarity_score"],
-                "warnings": json.dumps(eval_res["warnings"]),
+                "warnings": eval_res["warnings"],
                 "campaign_id": campaign["id"],
                 "generation_job_id": job_id,
                 "created_at": datetime.datetime.utcnow().isoformat(),

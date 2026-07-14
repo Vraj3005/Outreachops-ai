@@ -527,7 +527,7 @@ class SequenceService:
             "spam_risk_score": eval_res["scores"]["spam_risk_score"],
             "personalization_score": eval_res["scores"]["personalization_score"],
             "clarity_score": eval_res["scores"]["clarity_score"],
-            "warnings": json.dumps(eval_res["warnings"]),
+            "warnings": eval_res["warnings"],
             "campaign_id": campaign_id,
             "variant_id": assigned_variant_id,
             "variant_name": assigned_variant_name,
