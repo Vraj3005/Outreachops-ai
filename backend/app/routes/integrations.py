@@ -312,35 +312,29 @@ async def get_gemini_status(owner: dict = Depends(require_owner)):
     Verify Gemini API availability and returns models fallback list.
     """
     user_id = owner["id"]
-    if settings.DEMO_MODE:
-        # Load from DB if present
-        cfg = gemini_service._get_db_config(user_id)
+    cfg = gemini_service._get_db_config(user_id)
+    if cfg and cfg.get("api_key"):
         return {
             "status": "connected",
             "details": "Active session initialized.",
-            "allowed_model": cfg.get("allowed_model", "gemini-2.5-flash-lite"),
-            "fallback_models": cfg.get("fallback_models", ["gemini-2.5-flash"]),
+            "allowed_model": cfg.get("allowed_model", "gemini-2.5-flash"),
+            "fallback_models": cfg.get("fallback_models", ["gemini-2.5-flash-lite"]),
         }
 
-    try:
-        cfg = gemini_service._get_db_config(user_id)
-        # Try listing models to confirm connectivity
-        client = gemini_service._get_client(user_id)
-        client.models.list()
-
+    if settings.GEMINI_API_KEY:
         return {
             "status": "connected",
-            "details": "Active session initialized.",
-            "allowed_model": cfg.get("allowed_model", "gemini-2.5-flash-lite"),
-            "fallback_models": cfg.get("fallback_models", ["gemini-2.5-flash"]),
+            "details": "Using system default API key.",
+            "allowed_model": "gemini-2.5-flash",
+            "fallback_models": ["gemini-2.5-flash-lite"],
         }
-    except Exception as e:
-        return {
-            "status": "unconfigured",
-            "details": f"Connection check failed: {e}",
-            "allowed_model": "gemini-2.5-flash-lite",
-            "fallback_models": ["gemini-2.5-flash"],
-        }
+
+    return {
+        "status": "unconfigured",
+        "details": "No API key configured.",
+        "allowed_model": "gemini-2.5-flash",
+        "fallback_models": ["gemini-2.5-flash-lite"],
+    }
 
 
 @router.post("/gemini/config")
