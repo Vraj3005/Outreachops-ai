@@ -93,7 +93,13 @@ async def connect_gmail_account(request: Request, owner: dict = Depends(require_
     if settings.DEMO_MODE:
         return {"status": "success", "message": "Demo mode connection active."}
 
-    redirect_uri = f"{settings.BACKEND_URL}/api/v1/integrations/oauth2callback"
+    base_url = str(request.base_url).rstrip("/")
+    if "x-forwarded-proto" in request.headers:
+        proto = request.headers["x-forwarded-proto"]
+        if proto == "https" and base_url.startswith("http://"):
+            base_url = "https://" + base_url.split("://", 1)[1]
+
+    redirect_uri = f"{base_url}/api/v1/integrations/oauth2callback"
     try:
         auth_url, state = gmail_service.get_authorization_url(user_id, redirect_uri)
         return {
@@ -110,7 +116,9 @@ async def connect_gmail_account(request: Request, owner: dict = Depends(require_
 
 
 @router.get("/oauth2callback")
-async def gmail_oauth_callback(code: str = None, state: str = None, error: str = None):
+async def gmail_oauth_callback(
+    request: Request, code: str = None, state: str = None, error: str = None
+):
     """
     Handles Google OAuth redirect callback.
     Exchanges authorization code for tokens, caches them in database,
@@ -141,7 +149,13 @@ async def gmail_oauth_callback(code: str = None, state: str = None, error: str =
             url=f"{frontend_redirect_url}?error=invalid_state", status_code=302
         )
 
-    redirect_uri = f"{settings.BACKEND_URL}/api/v1/integrations/oauth2callback"
+    base_url = str(request.base_url).rstrip("/")
+    if "x-forwarded-proto" in request.headers:
+        proto = request.headers["x-forwarded-proto"]
+        if proto == "https" and base_url.startswith("http://"):
+            base_url = "https://" + base_url.split("://", 1)[1]
+
+    redirect_uri = f"{base_url}/api/v1/integrations/oauth2callback"
     try:
         res = gmail_service.exchange_callback_code(
             user_id, code, redirect_uri, code_verifier=code_verifier
