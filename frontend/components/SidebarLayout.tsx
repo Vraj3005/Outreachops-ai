@@ -4,7 +4,8 @@ import React from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { 
   Sparkles, RefreshCw, BarChart3, 
-  Settings, Database, Mail, LogOut, Code, Send, Clock, Inbox
+  Settings, Database, Mail, LogOut, Code, Send, Clock, Inbox,
+  Menu, X, ChevronLeft, ChevronRight
 } from "lucide-react";
 import { useToast } from "./Toast";
 import { supabase } from "@/lib/supabase";
@@ -36,6 +37,25 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const [sheetsStatus, setSheetsStatus] = React.useState(() => globalDiagnosticsCache?.sheets || "checking");
   const [geminiStatus, setGeminiStatus] = React.useState(() => globalDiagnosticsCache?.gemini || "checking");
   const [dbStatus, setDbStatus] = React.useState(() => globalDiagnosticsCache?.db || "checking");
+  const [isCollapsed, setIsCollapsed] = React.useState(false);
+  const [isMobileOpen, setIsMobileOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("sidebar_collapsed");
+      if (stored === "true") {
+        setIsCollapsed(true);
+      }
+    }
+  }, []);
+
+  const toggleCollapse = () => {
+    setIsCollapsed(prev => {
+      const newVal = !prev;
+      localStorage.setItem("sidebar_collapsed", String(newVal));
+      return newVal;
+    });
+  };
 
   React.useEffect(() => {
     const checkAuthAndDiagnostics = async () => {
@@ -216,6 +236,87 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     }
   };
 
+  const renderSidebarContent = (isMobile = false) => {
+    const collapsed = isMobile ? false : isCollapsed;
+    return (
+      <div className="flex flex-col h-full justify-between">
+        <div>
+          {/* Logo / Header */}
+          <div className="flex items-center justify-between mb-8">
+            <div className="flex items-center gap-2 cursor-pointer" onClick={() => { router.push("/dashboard"); if (isMobile) setIsMobileOpen(false); }}>
+              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-100 hover:scale-105 transition-transform">
+                <Sparkles className="w-3.5 h-3.5 text-white" />
+              </div>
+              {!collapsed && (
+                <span className="font-bold text-sm tracking-tight text-zinc-900 bg-gradient-to-r from-zinc-950 to-zinc-700 bg-clip-text text-transparent">
+                  OutreachOps AI
+                </span>
+              )}
+            </div>
+            {isMobile && (
+              <button onClick={() => setIsMobileOpen(false)} className="p-1 rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100">
+                <X className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+
+          {/* Nav Links */}
+          <nav className="space-y-1">
+            {navItems.map(item => {
+              const isActive = pathname === item.path;
+              const Icon = item.icon;
+              return (
+                <button
+                   key={item.path}
+                   onClick={() => { router.push(item.path); if (isMobile) setIsMobileOpen(false); }}
+                   className={`w-full flex items-center ${collapsed ? "justify-center px-1 py-2.5" : "gap-3 px-3 py-2"} rounded-lg font-medium text-xs transition-all ${
+                     isActive 
+                       ? "bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100/50 shadow-sm" 
+                       : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50/80"
+                   }`}
+                   title={collapsed ? item.name : undefined}
+                >
+                  <Icon className={`w-4 h-4 ${isActive ? "text-indigo-600" : "text-zinc-400"}`} />
+                  {!collapsed && <span>{item.name}</span>}
+                </button>
+              );
+            })}
+          </nav>
+        </div>
+
+        {/* User Card, Collapse Toggle & Logout */}
+        <div className="space-y-3 mt-auto pt-6 border-t border-zinc-100">
+          {!collapsed && (
+            <div className="p-3 rounded-lg bg-zinc-50 border border-zinc-200/80 text-[10px]">
+              <div className="text-zinc-400 font-semibold mb-1 uppercase tracking-wider">Account profile</div>
+              <div className="font-bold text-zinc-700 truncate">{userEmail}</div>
+            </div>
+          )}
+          
+          <button 
+            onClick={handleLogout}
+            className={`w-full flex items-center ${collapsed ? "justify-center py-2.5" : "gap-3 px-3 py-2"} rounded-lg text-zinc-600 hover:text-rose-600 hover:bg-rose-50 text-xs font-semibold transition-all`}
+            title={collapsed ? "Logout" : undefined}
+          >
+            <LogOut className="w-4 h-4 text-rose-500/80" />
+            {!collapsed && <span>Logout</span>}
+          </button>
+
+          {/* Collapse button - only for desktop layout */}
+          {!isMobile && (
+            <button
+              onClick={toggleCollapse}
+              className="w-full flex items-center justify-center p-2 rounded-lg border border-zinc-200 hover:bg-zinc-50 text-zinc-400 hover:text-zinc-700 transition-all text-[10px]"
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? <ChevronRight className="w-4 h-4" /> : <div className="flex items-center gap-1.5"><ChevronLeft className="w-3.5 h-3.5" /> <span>Collapse Menu</span></div>}
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   if (checkingAuth) {
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center font-sans">
@@ -229,81 +330,56 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
 
   return (
     <div className="min-h-screen bg-zinc-50/50 text-zinc-950 flex font-sans">
-      {/* Navigation Sidebar */}
-      <aside className="w-64 border-r border-zinc-200 bg-white flex flex-col justify-between p-6 shrink-0 z-20 shadow-[1px_0_3px_rgba(0,0,0,0.01)]">
-        <div>
-          {/* Logo */}
-          <div className="flex items-center gap-2 mb-8 cursor-pointer" onClick={() => router.push("/dashboard")}>
-            <div className="w-7 h-7 rounded-lg bg-zinc-900 flex items-center justify-center shadow-sm">
-              <Sparkles className="w-3.5 h-3.5 text-white" />
-            </div>
-            <span className="font-bold text-sm tracking-tight text-zinc-900">OutreachOps AI</span>
-          </div>
+      {/* Mobile sidebar drawer overlay */}
+      {isMobileOpen && (
+        <div 
+          className="fixed inset-0 bg-zinc-900/40 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setIsMobileOpen(false)}
+        />
+      )}
 
-          {/* Nav Links */}
-          <nav className="space-y-1">
-            {navItems.map(item => {
-              const isActive = pathname === item.path;
-              const Icon = item.icon;
-              return (
-                <button
-                   key={item.path}
-                   onClick={() => router.push(item.path)}
-                   className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium text-xs transition-all ${
-                     isActive 
-                       ? "bg-zinc-100 text-zinc-900 font-semibold border border-zinc-200/50 shadow-sm" 
-                       : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50/80"
-                   }`}
-                >
-                  <Icon className={`w-4 h-4 ${isActive ? "text-zinc-900" : "text-zinc-400"}`} />
-                  {item.name}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
+      {/* Mobile sidebar slide-over container */}
+      <aside className={`fixed top-0 bottom-0 left-0 bg-white z-50 p-6 flex flex-col justify-between border-r border-zinc-200 w-64 transform transition-transform duration-300 md:hidden ${isMobileOpen ? "translate-x-0" : "-translate-x-full"}`}>
+        {renderSidebarContent(true)}
+      </aside>
 
-        {/* User Card & Logout */}
-        <div className="space-y-3">
-          <div className="p-3 rounded-lg bg-zinc-50 border border-zinc-200/80 text-[10px]">
-            <div className="text-zinc-400 font-semibold mb-1 uppercase tracking-wider">Account profile</div>
-            <div className="font-bold text-zinc-700 truncate">{userEmail}</div>
-          </div>
-          
-          <button 
-            onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-zinc-600 hover:text-rose-600 hover:bg-rose-50 text-xs font-semibold transition-all"
-          >
-            <LogOut className="w-4 h-4 text-rose-500/80" />
-            Logout
-          </button>
-        </div>
+      {/* Desktop Navigation Sidebar */}
+      <aside className={`hidden md:flex flex-col justify-between border-r border-zinc-200 bg-white shrink-0 z-20 shadow-[1px_0_3px_rgba(0,0,0,0.01)] transition-all duration-300 ${isCollapsed ? "w-20 p-4" : "w-64 p-6"}`}>
+        {renderSidebarContent(false)}
       </aside>
 
       {/* Main Workspace Frame */}
       <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <header className="h-16 border-b border-zinc-200 px-8 flex items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-10">
-          <div className="flex items-center gap-4">
-            <span className="text-xs text-zinc-400 font-mono">Diagnostics:</span>
-            <div className="flex items-center gap-3 text-[10px] font-semibold">
+        <header className="h-16 border-b border-zinc-200 px-4 md:px-8 flex items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-10">
+          <div className="flex items-center gap-3">
+            {/* Mobile Menu Trigger */}
+            <button 
+              onClick={() => setIsMobileOpen(true)}
+              className="p-1.5 rounded-lg border border-zinc-200 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-50 md:hidden"
+            >
+              <Menu className="w-4.5 h-4.5" />
+            </button>
+            
+            <span className="text-xs text-zinc-400 font-mono hidden sm:inline">Diagnostics:</span>
+            <div className="flex flex-wrap items-center gap-1.5 text-[9px] sm:text-[10px] font-semibold">
               {/* Database Status */}
-              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(dbStatus, "db").wrapper}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(dbStatus, "db").dot}`}></span>
-                Database
+              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(dbStatus, "db").wrapper}`}>
+                <span className={`h-1 w-1 rounded-full ${getStatusClasses(dbStatus, "db").dot}`}></span>
+                DB Link
               </div>
               {/* Gmail status */}
-              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(gmailStatus, "gmail").wrapper}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(gmailStatus, "gmail").dot}`}></span>
+              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(gmailStatus, "gmail").wrapper}`}>
+                <span className={`h-1 w-1 rounded-full ${getStatusClasses(gmailStatus, "gmail").dot}`}></span>
                 Gmail API
               </div>
               {/* Sheets status */}
-              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(sheetsStatus, "sheets").wrapper}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(sheetsStatus, "sheets").dot}`}></span>
+              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(sheetsStatus, "sheets").wrapper}`}>
+                <span className={`h-1 w-1 rounded-full ${getStatusClasses(sheetsStatus, "sheets").dot}`}></span>
                 Sheets Sync
               </div>
               {/* Gemini status */}
-              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(geminiStatus, "gemini").wrapper}`}>
-                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(geminiStatus, "gemini").dot}`}></span>
+              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(geminiStatus, "gemini").wrapper}`}>
+                <span className={`h-1 w-1 rounded-full ${getStatusClasses(geminiStatus, "gemini").dot}`}></span>
                 Gemini API
               </div>
             </div>
@@ -315,11 +391,10 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                 DEMO MODE
               </span>
             )}
-            <span className="text-zinc-500">Tenant: Pitbull Corporations</span>
           </div>
         </header>
 
-        <main className="p-8">
+        <main className="p-4 md:p-8">
           <div className="max-w-7xl mx-auto space-y-8 animate-fade-in">
             {children}
           </div>

@@ -1173,7 +1173,7 @@ export default function LeadsPage() {
 
       {/* Floating Bulk Action Bar Dashboard */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-zinc-200 px-6 py-3 rounded-full shadow-lg z-30 flex items-center gap-3 animate-fade-in font-sans">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-md border border-zinc-200/80 px-6 py-3 rounded-full shadow-xl z-30 flex items-center gap-3 animate-fade-in font-sans">
           <span className="text-xs font-semibold text-zinc-600 whitespace-nowrap">
             <span className="text-zinc-950 font-extrabold">{selectedIds.size}</span> selected
           </span>

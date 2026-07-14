@@ -692,7 +692,7 @@ export default function DraftsPage() {
 
       {/* Floating Bulk Action Bar */}
       {selectedIds.size > 0 && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-white border border-zinc-200 px-6 py-3 rounded-full shadow-lg z-30 flex items-center gap-4 animate-fade-in">
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-md border border-zinc-200/80 px-6 py-3 rounded-full shadow-xl z-30 flex items-center gap-4 animate-fade-in">
           <span className="text-xs font-semibold text-zinc-600">
             <span className="text-zinc-950 font-bold">{selectedIds.size}</span> drafts selected
           </span>
