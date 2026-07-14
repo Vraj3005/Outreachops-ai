@@ -81,9 +81,14 @@ CREATE TABLE IF NOT EXISTS sequence_steps (
     sequence_id UUID REFERENCES sequences(id) ON DELETE CASCADE NOT NULL,
     step_number INTEGER NOT NULL,
     delay_hours INTEGER DEFAULT 24,
+    delay_unit TEXT DEFAULT 'hours',
     prompt_version_id UUID REFERENCES prompt_versions(id) ON DELETE SET NULL,
+    subject_template_version_id UUID REFERENCES prompt_versions(id) ON DELETE SET NULL,
+    body_template_version_id UUID REFERENCES prompt_versions(id) ON DELETE SET NULL,
     subject_instruction TEXT,
     body_instruction TEXT,
+    custom_instructions TEXT,
+    require_manual_approval BOOLEAN DEFAULT true,
     stop_conditions JSONB DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
@@ -123,6 +128,8 @@ ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS selected_leads JSONB DEFAULT '[]'
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS language TEXT DEFAULT 'en';
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS start_date TEXT;
 ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS prompt_config_snapshot JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS ooo_behavior TEXT DEFAULT 'ignore';
+ALTER TABLE campaigns ADD COLUMN IF NOT EXISTS parent_campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL;
 
 -- 8. UPDATE LEADS WITH V2 FIELDS
 ALTER TABLE leads ADD COLUMN IF NOT EXISTS first_name TEXT;
@@ -147,6 +154,10 @@ CREATE TABLE IF NOT EXISTS campaign_leads (
     status TEXT DEFAULT 'enrolled', -- enrolled, active, paused, stopped, completed
     current_sequence_step INTEGER DEFAULT 1,
     stopped_reason TEXT,
+    next_step_scheduled_at TIMESTAMPTZ,
+    last_sent_at TIMESTAMPTZ,
+    last_error TEXT,
+    exclude_weekends BOOLEAN DEFAULT true,
     enrolled_at TIMESTAMPTZ DEFAULT NOW(),
     completed_at TIMESTAMPTZ,
     UNIQUE(campaign_id, lead_id)
@@ -184,6 +195,13 @@ CREATE TABLE IF NOT EXISTS scheduled_emails (
     lead_id UUID REFERENCES leads(id) ON DELETE CASCADE NOT NULL,
     scheduled_at TIMESTAMPTZ NOT NULL,
     status TEXT DEFAULT 'pending', -- pending, sent, failed, cancelled
+    sequence_step_id UUID REFERENCES sequence_steps(id) ON DELETE SET NULL,
+    attempts INTEGER DEFAULT 0,
+    idempotency_key TEXT,
+    gmail_message_id TEXT,
+    gmail_thread_id TEXT,
+    last_error TEXT,
+    scheduled_for TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -198,6 +216,9 @@ CREATE TABLE IF NOT EXISTS send_events (
     recipient_email TEXT NOT NULL,
     gmail_message_id TEXT,
     error_message TEXT,
+    variant_id UUID,
+    variant_name TEXT,
+    prompt_version_id UUID REFERENCES prompt_versions(id) ON DELETE SET NULL,
     occurred_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -213,6 +234,11 @@ CREATE TABLE IF NOT EXISTS reply_events (
     subject TEXT,
     body TEXT,
     sentiment TEXT DEFAULT 'neutral', -- positive, neutral, negative
+    category TEXT,
+    confidence REAL,
+    rule_model_used TEXT,
+    explanation TEXT,
+    manual_override BOOLEAN DEFAULT false,
     replied_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -245,6 +271,7 @@ CREATE TABLE IF NOT EXISTS experiment_variants (
     name TEXT NOT NULL,
     description TEXT,
     weight NUMERIC DEFAULT 0.5,
+    prompt_template_version_id UUID REFERENCES prompt_versions(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -255,10 +282,15 @@ CREATE TABLE IF NOT EXISTS integration_connections (
     provider TEXT NOT NULL, -- google_sheets, gmail
     connection_status TEXT DEFAULT 'disconnected',
     encrypted_credentials TEXT,
+    last_history_id TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     UNIQUE(user_id, provider)
 );
+
+-- 16. ALTER EMAIL DRAFTS TABLE (V2 VARIANT TRACKING SUPPORT)
+ALTER TABLE email_drafts ADD COLUMN IF NOT EXISTS variant_id UUID;
+ALTER TABLE email_drafts ADD COLUMN IF NOT EXISTS variant_name TEXT;
 
 -- 16. DATA MIGRATIONS BLOCK
 DO $$

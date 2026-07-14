@@ -51,7 +51,11 @@ async def get_gmail_status(owner: dict = Depends(require_owner)):
             "status": "connected" if settings.DEMO_SENDING_ENABLED else "disconnected",
             "details": "Demo mode active status.",
             "connected_account": "demo-owner@pitbull.com",
-            "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+            "scopes": [
+                "https://www.googleapis.com/auth/gmail.send",
+                "https://www.googleapis.com/auth/gmail.readonly",
+                "https://www.googleapis.com/auth/userinfo.email",
+            ],
         }
 
     try:
@@ -77,7 +81,11 @@ async def get_gmail_status(owner: dict = Depends(require_owner)):
                 "status": "connected",
                 "details": "Active OAuth session initialized.",
                 "connected_account": email,
-                "scopes": ["https://www.googleapis.com/auth/gmail.send"],
+                "scopes": [
+                    "https://www.googleapis.com/auth/gmail.send",
+                    "https://www.googleapis.com/auth/gmail.readonly",
+                    "https://www.googleapis.com/auth/userinfo.email",
+                ],
             }
         return res
     except Exception as e:
