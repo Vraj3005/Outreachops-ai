@@ -15,6 +15,7 @@ gmail_token.pkl
 *.pkl
 *.json
 !package.json
+!package-lock.json
 !tsconfig.json
 !next.config.js
 !next.config.mjs
