@@ -8,6 +8,7 @@ import signal
 import sys
 import threading
 import time
+import uuid
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Any
@@ -451,6 +452,23 @@ class DurableSendingWorker:
             {"status": "sent", "sent_at": now_str}
         ).eq("id", draft["id"]).execute()
 
+        # Validate prompt_version_id
+        prompt_ver_id = draft.get("prompt_version")
+        valid_prompt_ver_id = None
+        if prompt_ver_id and prompt_ver_id != "default":
+            try:
+                uuid.UUID(str(prompt_ver_id))
+                ver_res = (
+                    supabase.table("prompt_versions")
+                    .select("id")
+                    .eq("id", prompt_ver_id)
+                    .execute()
+                )
+                if ver_res.data:
+                    valid_prompt_ver_id = prompt_ver_id
+            except Exception:
+                pass
+
         # Insert send event log
         mocker_func = globals().get("mocker_uuid")
         event_id = str(mocker_func() if mocker_func else uuid_gen())
@@ -467,7 +485,7 @@ class DurableSendingWorker:
                 "gmail_thread_id": gmail_thread_id,
                 "variant_id": draft.get("variant_id"),
                 "variant_name": draft.get("variant_name"),
-                "prompt_version_id": draft.get("prompt_version"),
+                "prompt_version_id": valid_prompt_ver_id,
                 "occurred_at": now_str,
             }
         ).execute()
@@ -550,6 +568,23 @@ class DurableSendingWorker:
                 except Exception:
                     pass
 
+            # Validate prompt_version_id
+            prompt_ver_id = draft.get("prompt_version")
+            valid_prompt_ver_id = None
+            if prompt_ver_id and prompt_ver_id != "default":
+                try:
+                    uuid.UUID(str(prompt_ver_id))
+                    ver_res = (
+                        supabase.table("prompt_versions")
+                        .select("id")
+                        .eq("id", prompt_ver_id)
+                        .execute()
+                    )
+                    if ver_res.data:
+                        valid_prompt_ver_id = prompt_ver_id
+                except Exception:
+                    pass
+
             mocker_func = globals().get("mocker_uuid")
             event_id = str(mocker_func() if mocker_func else uuid_gen())
             supabase.table("send_events").insert(
@@ -564,7 +599,7 @@ class DurableSendingWorker:
                     "error_message": error,
                     "variant_id": draft.get("variant_id"),
                     "variant_name": draft.get("variant_name"),
-                    "prompt_version_id": draft.get("prompt_version"),
+                    "prompt_version_id": valid_prompt_ver_id,
                     "occurred_at": now_str,
                 }
             ).execute()
