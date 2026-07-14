@@ -132,8 +132,9 @@ async def gmail_oauth_callback(code: str = None, state: str = None, error: str =
         )
 
     try:
-        parts = state.split(":", 1)
+        parts = state.split(":", 2)
         user_id = parts[0]
+        code_verifier = parts[2] if len(parts) > 2 else None
     except Exception as e:
         logger.error(f"Invalid state format in OAuth callback: {e}")
         return RedirectResponse(
@@ -142,7 +143,9 @@ async def gmail_oauth_callback(code: str = None, state: str = None, error: str =
 
     redirect_uri = f"{settings.BACKEND_URL}/api/v1/integrations/oauth2callback"
     try:
-        res = gmail_service.exchange_callback_code(user_id, code, redirect_uri)
+        res = gmail_service.exchange_callback_code(
+            user_id, code, redirect_uri, code_verifier=code_verifier
+        )
         if res.get("status") == "failed":
             error_msg = res.get("error", "OAuth exchange failed")
             return RedirectResponse(

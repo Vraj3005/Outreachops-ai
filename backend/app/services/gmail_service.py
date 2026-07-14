@@ -181,9 +181,14 @@ class GmailService:
         flow = Flow.from_client_secrets_file(
             self.creds_path, scopes=self.scopes, redirect_uri=redirect_uri
         )
+
+        # Trigger authorization_url to pre-generate the code_verifier
+        flow.authorization_url()
+        code_verifier = getattr(flow, "code_verifier", "")
+
         import uuid
 
-        state_token = f"{user_id}:{uuid.uuid4().hex}"
+        state_token = f"{user_id}:{uuid.uuid4().hex}:{code_verifier}"
 
         auth_url, _ = flow.authorization_url(
             access_type="offline",
@@ -194,7 +199,7 @@ class GmailService:
         return auth_url, state_token
 
     def exchange_callback_code(
-        self, user_id: str, code: str, redirect_uri: str
+        self, user_id: str, code: str, redirect_uri: str, code_verifier: str = None
     ) -> dict[str, Any]:
         """
         Exchanges the authorization code from Google callback for credentials.
@@ -207,7 +212,10 @@ class GmailService:
 
         try:
             flow = Flow.from_client_secrets_file(
-                self.creds_path, scopes=self.scopes, redirect_uri=redirect_uri
+                self.creds_path,
+                scopes=self.scopes,
+                redirect_uri=redirect_uri,
+                code_verifier=code_verifier,
             )
             flow.fetch_token(code=code)
             creds = flow.credentials
