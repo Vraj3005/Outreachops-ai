@@ -136,6 +136,7 @@ def test_history_expiration_fallback(mocker):
         data=[{"user_id": "user-1", "last_history_id": "9999"}]
     )
     mocker.patch("app.services.gmail_sync_service.supabase", mock_supabase)
+    mocker.patch("app.services.gmail_sync_service.settings.DEMO_MODE", False)
 
     mock_gmail = mocker.MagicMock()
     mocker.patch(

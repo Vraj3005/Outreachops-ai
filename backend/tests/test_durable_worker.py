@@ -13,6 +13,7 @@ def test_guardrails_active_campaign_check(mocker):
     # Mock DB
     mock_supabase = mocker.MagicMock()
     mocker.patch("app.services.durable_sending_worker.supabase", mock_supabase)
+    mocker.patch("app.services.durable_sending_worker.settings.DEMO_MODE", False)
 
     ok, reason = DurableSendingWorker._check_guardrails(job, campaign, lead, draft)
     assert ok is False
@@ -31,6 +32,7 @@ def test_guardrails_dnc_list_block(mocker):
         data=[{"id": "dnc-rec"}]
     )
     mocker.patch("app.services.durable_sending_worker.supabase", mock_supabase)
+    mocker.patch("app.services.durable_sending_worker.settings.DEMO_MODE", False)
 
     ok, reason = DurableSendingWorker._check_guardrails(job, campaign, lead, draft)
     assert ok is False
@@ -65,6 +67,7 @@ def test_guardrails_unsubscribed_tag_block(mocker):
 
     mock_supabase.table.side_effect = select_side_effect
     mocker.patch("app.services.durable_sending_worker.supabase", mock_supabase)
+    mocker.patch("app.services.durable_sending_worker.settings.DEMO_MODE", False)
 
     ok, reason = DurableSendingWorker._check_guardrails(job, campaign, lead, draft)
     assert ok is False
