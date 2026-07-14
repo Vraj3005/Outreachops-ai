@@ -137,6 +137,7 @@ export default function CampaignsPage() {
   const [activeSequenceSteps, setActiveSequenceSteps] = useState<any[]>([]);
   const [activeTimeline, setActiveTimeline] = useState<any[]>([]);
   const [promptVersions, setPromptVersions] = useState<any[]>([]);
+  const [promptTemplates, setPromptTemplates] = useState<any[]>([]);
   
   const [wizardTimezone, setWizardTimezone] = useState("UTC");
   const [wizardDailyLimit, setWizardDailyLimit] = useState(50);
@@ -220,6 +221,7 @@ export default function CampaignsPage() {
       const promptsRes = await fetch(`${API_URL}/api/v1/prompts`);
       if (promptsRes.ok) {
         const promptsData = await promptsRes.json();
+        setPromptTemplates(promptsData || []);
         let versions: any[] = [];
         for (const pt of promptsData) {
           const vRes = await fetch(`${API_URL}/api/v1/prompts/${pt.id}/versions`);
@@ -1210,6 +1212,20 @@ export default function CampaignsPage() {
                         className="w-full px-3 py-2 rounded-lg bg-zinc-50 border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950 transition-all font-semibold"
                       />
                     </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Email Prompt Template (from Prompt Studio)</label>
+                    <select
+                      value={wizardPromptId}
+                      onChange={e => setWizardPromptId(e.target.value)}
+                      className="w-full px-3 py-2 rounded-lg bg-zinc-50 border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950 transition-all"
+                    >
+                      <option value="">-- Use Default System Prompt --</option>
+                      {promptTemplates.map(t => (
+                        <option key={t.id} value={t.id}>{t.name} (v{t.version})</option>
+                      ))}
+                    </select>
                   </div>
                 </div>
               )}
