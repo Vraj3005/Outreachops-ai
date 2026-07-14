@@ -120,6 +120,29 @@ async def require_owner(
                 )
             )
 
+        # Auto-provision user profile in public.users if missing
+        try:
+            full_name = "Owner"
+            if hasattr(user, "user_metadata") and user.user_metadata:
+                full_name = (
+                    user.user_metadata.get("full_name")
+                    or user.user_metadata.get("name")
+                    or "Owner"
+                )
+            supabase.table("users").upsert(
+                {
+                    "id": user_id,
+                    "email": email,
+                    "full_name": full_name,
+                }
+            ).execute()
+        except Exception as ue:
+            import logging
+
+            logging.getLogger("outreachops.auth").error(
+                f"Failed to auto-provision user profile: {ue}"
+            )
+
         return {"id": user_id, "email": email}
     except Exception as e:
         if isinstance(e, HTTPException):
