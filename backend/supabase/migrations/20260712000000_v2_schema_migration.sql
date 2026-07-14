@@ -79,8 +79,10 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
 CREATE TABLE IF NOT EXISTS sequence_steps (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     sequence_id UUID REFERENCES sequences(id) ON DELETE CASCADE NOT NULL,
+    name TEXT,
     step_number INTEGER NOT NULL,
     delay_hours INTEGER DEFAULT 24,
+    delay_amount INTEGER DEFAULT 24,
     delay_unit TEXT DEFAULT 'hours',
     prompt_version_id UUID REFERENCES prompt_versions(id) ON DELETE SET NULL,
     subject_template_version_id UUID REFERENCES prompt_versions(id) ON DELETE SET NULL,
@@ -171,6 +173,14 @@ CREATE TABLE IF NOT EXISTS generation_jobs (
     status TEXT DEFAULT 'pending', -- pending, processing, completed, failed
     total_items INTEGER DEFAULT 0,
     processed_items INTEGER DEFAULT 0,
+    total INTEGER DEFAULT 0,
+    queued INTEGER DEFAULT 0,
+    processing INTEGER DEFAULT 0,
+    completed INTEGER DEFAULT 0,
+    failed INTEGER DEFAULT 0,
+    cancelled INTEGER DEFAULT 0,
+    model_configuration_snapshot JSONB DEFAULT '{}'::jsonb,
+    prompt_version TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -182,6 +192,11 @@ CREATE TABLE IF NOT EXISTS generation_job_items (
     status TEXT DEFAULT 'pending', -- pending, completed, failed
     draft_id UUID REFERENCES email_drafts(id) ON DELETE SET NULL,
     error_message TEXT,
+    sequence_step_id UUID REFERENCES sequence_steps(id) ON DELETE SET NULL,
+    attempts INTEGER DEFAULT 0,
+    error_type TEXT,
+    resulting_draft_id UUID REFERENCES email_drafts(id) ON DELETE SET NULL,
+    idempotency_key TEXT,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -291,6 +306,8 @@ CREATE TABLE IF NOT EXISTS integration_connections (
 -- 16. ALTER EMAIL DRAFTS TABLE (V2 VARIANT TRACKING SUPPORT)
 ALTER TABLE email_drafts ADD COLUMN IF NOT EXISTS variant_id UUID;
 ALTER TABLE email_drafts ADD COLUMN IF NOT EXISTS variant_name TEXT;
+ALTER TABLE email_drafts ADD COLUMN IF NOT EXISTS campaign_id UUID REFERENCES campaigns(id) ON DELETE SET NULL;
+ALTER TABLE email_drafts ADD COLUMN IF NOT EXISTS generation_job_id UUID REFERENCES generation_jobs(id) ON DELETE SET NULL;
 
 -- 16. DATA MIGRATIONS BLOCK
 DO $$
