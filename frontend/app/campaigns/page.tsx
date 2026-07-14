@@ -92,6 +92,7 @@ const LENGTH_OPTIONS = [
 export default function CampaignsPage() {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [activeCampaign, setActiveCampaign] = useState<Campaign | null>(null);
+  const [editCampaignId, setEditCampaignId] = useState<string | null>(null);
   
   // Wizard Modal State
   const [showWizard, setShowWizard] = useState(false);
@@ -346,6 +347,100 @@ export default function CampaignsPage() {
     }
   };
 
+  const handleDeleteCampaign = async (id: string) => {
+    if (!confirm("Are you sure you want to permanently delete this campaign? This will remove all associated statistics, sequence steps, and dispatch settings. This cannot be undone.")) {
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/v1/campaigns/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast("Campaign deleted successfully.", "success");
+        if (activeCampaign?.id === id) {
+          setActiveCampaign(null);
+        }
+        fetchCampaignsAndTelemetry();
+      } else {
+        toast("Failed to delete campaign", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Connection error", "error");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleEditCampaignClick = (camp: Campaign) => {
+    setEditCampaignId(camp.id);
+    setWizardStep(1);
+    
+    // Pre-populate fields
+    setWizardName(camp.name || "");
+    setWizardPreset(camp.preset || "Introduce a service");
+    if (camp.preset === "Custom") {
+      setWizardCustomObjective(camp.objective || "");
+      setWizardObjective("");
+    } else {
+      setWizardObjective(camp.objective || "");
+      setWizardCustomObjective("");
+    }
+    setWizardDescription(camp.description || "");
+    setWizardOffer(camp.offer || "");
+    setWizardValProp(camp.value_proposition || "");
+    setWizardProofPoints(camp.proof_points || "");
+    setWizardRequiredFacts(camp.required_facts || "");
+    setWizardProhibitedClaims(camp.prohibited_claims || "");
+    setWizardIndustry(camp.target_industry || "");
+    setWizardRoles(camp.target_roles || "");
+    setWizardCountries(camp.countries || "");
+    setWizardTagsInput(camp.tags ? camp.tags.join(", ") : "");
+    setWizardMinScore(camp.min_lead_fit_score || 0);
+    setWizardTone(camp.tone || "professional");
+    setWizardLength(camp.email_length || "medium");
+    setWizardLanguage(camp.language || "en");
+    setWizardCTA(camp.CTA || "");
+    setWizardReqInput(camp.required_content ? camp.required_content.join(", ") : "");
+    setWizardBannedInput(camp.banned_content ? camp.banned_content.join(", ") : "");
+    setWizardPromptId(camp.prompt_template_id || "");
+    setWizardSequenceId(camp.sequence_id || "");
+    setWizardTimezone(camp.timezone || "UTC");
+    setWizardDailyLimit(camp.daily_send_limit || 50);
+    setWizardSpacing(camp.send_spacing_seconds || 60);
+    setWizardWindowStart(camp.sending_window_start || "09:00");
+    setWizardWindowEnd(camp.sending_window_end || "17:00");
+    setWizardStartDate(camp.start_date || "");
+    setWizardApprovalMode(camp.approval_mode || "manual");
+
+    // Fetch sequence steps dynamically
+    fetch(`${API_URL}/api/v1/campaigns/${camp.id}/sequence`)
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.steps && data.steps.length > 0) {
+          setWizardSteps(data.steps.map((s: any) => ({
+            name: s.name,
+            step_number: s.step_number,
+            delay_amount: s.delay_amount,
+            delay_unit: s.delay_unit,
+            require_manual_approval: s.require_manual_approval,
+            custom_instructions: s.custom_instructions || ""
+          })));
+        } else {
+          // Keep defaults
+          setWizardSteps([
+            { name: "Initial Outreach", step_number: 1, delay_amount: 0, delay_unit: "hours", require_manual_approval: true, custom_instructions: "" },
+            { name: "Follow-up", step_number: 2, delay_amount: 3, delay_unit: "days", require_manual_approval: true, custom_instructions: "" },
+            { name: "Final Follow-up", step_number: 3, delay_amount: 7, delay_unit: "days", require_manual_approval: true, custom_instructions: "" }
+          ]);
+        }
+      })
+      .catch(err => {
+        console.error("Failed to load sequence for edit:", err);
+      });
+    
+    setShowWizard(true);
+  };
+
   // Generate previews inside Wizard step 7
   const generateWizardPreviews = async () => {
     setLoadingPreviews(true);
@@ -431,32 +526,43 @@ export default function CampaignsPage() {
         approval_mode: wizardApprovalMode
       };
 
-      const res = await fetch(`${API_URL}/api/v1/campaigns`, {
-        method: "POST",
+      const saveUrl = editCampaignId 
+        ? `${API_URL}/api/v1/campaigns/${editCampaignId}`
+        : `${API_URL}/api/v1/campaigns`;
+      
+      const saveMethod = editCampaignId ? "PATCH" : "POST";
+
+      const res = await fetch(saveUrl, {
+        method: saveMethod,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(campaignPayload)
       });
 
       if (res.ok) {
-        const createdCampaign = await res.json();
+        const savedCampaign = await res.json();
         
         // Save sequence steps configuration
         try {
-          const stepsRes = await fetch(`${API_URL}/api/v1/campaigns/${createdCampaign.id}/sequence/steps`, {
+          const stepsRes = await fetch(`${API_URL}/api/v1/campaigns/${savedCampaign.id}/sequence/steps`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ steps: wizardSteps })
           });
           if (!stepsRes.ok) {
-            toast("Campaign created but failed to save custom sequence steps.", "info");
+            toast("Campaign saved but failed to update custom sequence steps.", "info");
           }
         } catch (stepErr) {
           console.error("Sequence steps save failure:", stepErr);
         }
 
-        toast(`Campaign '${wizardName}' created successfully!`, "success");
+        const msg = editCampaignId 
+          ? `Campaign '${wizardName}' updated successfully!`
+          : `Campaign '${wizardName}' created successfully!`;
+        toast(msg, "success");
+        
         setShowWizard(false);
         setWizardStep(1);
+        setEditCampaignId(null);
         // Reset states
         setWizardName("");
         setWizardObjective("");
@@ -466,7 +572,7 @@ export default function CampaignsPage() {
         fetchCampaignsAndTelemetry();
       } else {
         const err = await res.json();
-        toast(err.detail || "Failed to create campaign", "error");
+        toast(err.detail || "Failed to save campaign", "error");
       }
     } catch (e) {
       console.error(e);
@@ -488,7 +594,47 @@ export default function CampaignsPage() {
         </div>
         <div className="flex gap-2">
           <button 
-            onClick={() => setShowWizard(true)}
+            onClick={() => {
+              setEditCampaignId(null);
+              // Reset all states
+              setWizardName("");
+              setWizardPreset("Introduce a service");
+              setWizardObjective("");
+              setWizardCustomObjective("");
+              setWizardDescription("");
+              setWizardOffer("");
+              setWizardValProp("");
+              setWizardProofPoints("");
+              setWizardRequiredFacts("");
+              setWizardProhibitedClaims("");
+              setWizardIndustry("");
+              setWizardRoles("");
+              setWizardCountries("");
+              setWizardTagsInput("");
+              setWizardMinScore(0);
+              setWizardTone("professional");
+              setWizardLength("medium");
+              setWizardLanguage("en");
+              setWizardCTA("");
+              setWizardReqInput("");
+              setWizardBannedInput("");
+              setWizardPromptId("");
+              setWizardSequenceId("");
+              setWizardTimezone("UTC");
+              setWizardDailyLimit(50);
+              setWizardSpacing(60);
+              setWizardWindowStart("09:00");
+              setWizardWindowEnd("17:00");
+              setWizardStartDate("");
+              setWizardApprovalMode("manual");
+              setWizardSteps([
+                { name: "Initial Outreach", step_number: 1, delay_amount: 0, delay_unit: "hours", require_manual_approval: true, custom_instructions: "" },
+                { name: "Follow-up", step_number: 2, delay_amount: 3, delay_unit: "days", require_manual_approval: true, custom_instructions: "" },
+                { name: "Final Follow-up", step_number: 3, delay_amount: 7, delay_unit: "days", require_manual_approval: true, custom_instructions: "" }
+              ]);
+              setWizardStep(1);
+              setShowWizard(true);
+            }}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-lg text-xs font-bold transition-all shadow-sm"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -526,7 +672,7 @@ export default function CampaignsPage() {
               <div className="divide-y divide-zinc-100">
                 {campaigns.map((camp) => (
                   <div key={camp.id} className="p-6 hover:bg-zinc-50 transition-colors space-y-3">
-                    <div className="flex items-start justify-between">
+                     <div className="flex items-start justify-between">
                       <div>
                         <h4 className="font-bold text-zinc-900 text-sm flex items-center gap-2">
                           {camp.name}
@@ -565,6 +711,14 @@ export default function CampaignsPage() {
                           </button>
                         )}
                         <button
+                          onClick={() => handleEditCampaignClick(camp)}
+                          disabled={actionLoading}
+                          className="p-1.5 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 rounded transition-all border border-zinc-200"
+                          title="Edit campaign settings"
+                        >
+                          <Sliders className="w-3 h-3" />
+                        </button>
+                        <button
                           onClick={() => handleCloneCampaign(camp.id)}
                           disabled={actionLoading}
                           className="p-1.5 bg-zinc-50 text-zinc-500 hover:bg-zinc-100 rounded transition-all border border-zinc-200"
@@ -582,6 +736,14 @@ export default function CampaignsPage() {
                             <Archive className="w-3 h-3" />
                           </button>
                         )}
+                        <button
+                          onClick={() => handleDeleteCampaign(camp.id)}
+                          disabled={actionLoading}
+                          className="p-1.5 bg-zinc-50 text-zinc-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-all border border-zinc-200"
+                          title="Delete campaign permanently"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
                       </div>
                     </div>
 
@@ -758,7 +920,9 @@ export default function CampaignsPage() {
             {/* Header / Step Bar */}
             <div className="p-6 border-b border-zinc-100 flex items-center justify-between">
               <div>
-                <h3 className="font-bold text-zinc-900 text-base">Generic Outreach Campaign Wizard</h3>
+                <h3 className="font-bold text-zinc-900 text-base">
+                  {editCampaignId ? "Edit Outreach Campaign Settings" : "Generic Outreach Campaign Wizard"}
+                </h3>
                 <p className="text-[10px] text-zinc-400 uppercase font-bold tracking-wider mt-1">Step {wizardStep} of 7: {
                   wizardStep === 1 ? "Identity" :
                   wizardStep === 2 ? "Offer" :
