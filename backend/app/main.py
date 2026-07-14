@@ -39,10 +39,14 @@ from app.routes import (
     settings as settings_route,
 )
 from app.services.error_service import register_error_handlers
+from app.utils.logging import LoggingMiddleware, setup_structured_logging
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Initialize structured JSON logging
+    setup_structured_logging()
+    
     # Startup actions
     init_db()
 
@@ -67,6 +71,9 @@ app = FastAPI(
     version="1.0.0",
     lifespan=lifespan,
 )
+
+# Register custom logging context middleware
+app.add_middleware(LoggingMiddleware)
 
 # Register custom exception handler middleware
 register_error_handlers(app)

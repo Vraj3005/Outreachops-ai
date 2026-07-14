@@ -36,6 +36,9 @@ def get_default_owner_settings(owner_id: str) -> dict[str, Any]:
         "allowed_send_end": "17:00",
         "required_footer": "To opt-out, please reply to this email requesting removal.",
         "banned_phrases": [],
+        "generation_worker_paused": False,
+        "sending_worker_paused": False,
+        "queue_drain_enabled": False,
     }
 
 

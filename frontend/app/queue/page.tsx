@@ -3,9 +3,11 @@
 import React, { useState, useEffect } from "react";
 import SidebarLayout from "@/components/SidebarLayout";
 import { useToast } from "@/components/Toast";
+import { supabase } from "@/lib/supabase";
 import { 
   Clock, RefreshCw, AlertTriangle, CheckCircle, 
-  XCircle, RotateCcw, Ban, Activity, Filter, HelpCircle
+  XCircle, RotateCcw, Ban, Activity, Filter,
+  Play, Pause, Cpu, Database, AlertCircle, ShieldAlert
 } from "lucide-react";
 
 interface ScheduledEmail {
@@ -37,28 +39,72 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 export default function QueuePage() {
   const [queue, setQueue] = useState<ScheduledEmail[]>([]);
   const [health, setHealth] = useState<WorkerHealth>({ status: "checking" });
+  const [diagnostics, setDiagnostics] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
+  const [controlsLoading, setControlsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const { toast } = useToast();
+
+  const getAuthToken = async (): Promise<string> => {
+    let token = "mock-owner-token"; // Default for demo mode bypass
+    try {
+      if (supabase) {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session) {
+          token = data.session.access_token;
+        }
+      } else {
+        // Scrape localStorage for active JWT tokens
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.includes("auth-token")) {
+            const val = localStorage.getItem(key);
+            if (val) {
+              const parsed = JSON.parse(val);
+              if (parsed.access_token) {
+                token = parsed.access_token;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Could not retrieve active session token:", e);
+    }
+    return token;
+  };
 
   const fetchQueueAndHealth = async () => {
     setLoading(true);
     try {
+      const token = await getAuthToken();
+      const headers: Record<string, string> = {
+        "Authorization": `Bearer ${token}`
+      };
+
       // 1. Fetch Queue items
-      const qRes = await fetch(`${API_URL}/api/v1/emails/queue`);
+      const qRes = await fetch(`${API_URL}/api/v1/emails/queue`, { headers });
       if (qRes.ok) {
         const qData = await qRes.json();
         setQueue(qData || []);
       }
 
-      // 2. Fetch Worker Health
-      const hRes = await fetch(`${API_URL}/api/v1/emails/worker-health`);
-      if (hRes.ok) {
-        const hData = await hRes.json();
-        setHealth(hData);
+      // 2. Fetch Detailed Diagnostics
+      const diagRes = await fetch(`${API_URL}/api/v1/health/diagnostics`, { headers });
+      if (diagRes.ok) {
+        const diagData = await diagRes.json();
+        setDiagnostics(diagData);
+        setHealth(diagData.workers.sending_worker);
       } else {
-        setHealth({ status: "offline", reason: "API health check failed" });
+        // Fallback to simple health endpoint if diagnostics is not authorized
+        const hRes = await fetch(`${API_URL}/api/v1/emails/worker-health`, { headers });
+        if (hRes.ok) {
+          const hData = await hRes.json();
+          setHealth(hData);
+        } else {
+          setHealth({ status: "offline", reason: "API health check failed" });
+        }
       }
     } catch (e) {
       console.error(e);
@@ -78,8 +124,12 @@ export default function QueuePage() {
   const handleRetry = async (id: string) => {
     setActionLoading(id);
     try {
+      const token = await getAuthToken();
       const res = await fetch(`${API_URL}/api/v1/emails/queue/${id}/retry`, {
-        method: "POST"
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
       });
       if (res.ok) {
         toast("Email scheduled for retry.", "success");
@@ -98,8 +148,12 @@ export default function QueuePage() {
   const handleCancel = async (id: string) => {
     setActionLoading(id);
     try {
+      const token = await getAuthToken();
       const res = await fetch(`${API_URL}/api/v1/emails/queue/${id}/cancel`, {
-        method: "POST"
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
       });
       if (res.ok) {
         toast("Email schedule cancelled.", "info");
@@ -112,6 +166,34 @@ export default function QueuePage() {
       toast("Connection error", "error");
     } finally {
       setActionLoading(null);
+    }
+  };
+
+  const toggleWorkerControl = async (field: string, currentValue: boolean) => {
+    setControlsLoading(true);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${API_URL}/api/v1/settings`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          [field]: !currentValue
+        })
+      });
+      if (res.ok) {
+        toast("Worker controls updated.", "success");
+        fetchQueueAndHealth();
+      } else {
+        toast("Failed to update worker controls.", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Connection error", "error");
+    } finally {
+      setControlsLoading(false);
     }
   };
 
@@ -167,8 +249,8 @@ export default function QueuePage() {
       {/* Title */}
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg font-bold text-zinc-950 tracking-tight">Outbox Dispatch Queue</h2>
-          <p className="text-xs text-zinc-500">Monitor active worker claims, retry failures, and check heartbeats</p>
+          <h2 className="text-lg font-bold text-zinc-950 tracking-tight">Outbox & Worker Control Dashboard</h2>
+          <p className="text-xs text-zinc-500">Monitor queue depth, pause/resume processes, and view real-time engine diagnostics</p>
         </div>
         <button 
           onClick={fetchQueueAndHealth}
@@ -265,7 +347,7 @@ export default function QueuePage() {
                                 className="p-1 text-indigo-600 hover:bg-indigo-50 border border-zinc-200 bg-white rounded shadow-sm transition-all"
                                 title="Retry dispatch"
                               >
-                                <RotateCcw className="w-3 h-3" />
+                                <RotateCcw className="w-3.5 h-3.5" />
                               </button>
                             )}
                             {(item.status === "pending" || item.status === "retry" || item.status === "failed") && (
@@ -275,7 +357,7 @@ export default function QueuePage() {
                                 className="p-1 text-rose-600 hover:bg-rose-50 border border-zinc-200 bg-white rounded shadow-sm transition-all"
                                 title="Cancel dispatch"
                               >
-                                <Ban className="w-3 h-3" />
+                                <Ban className="w-3.5 h-3.5" />
                               </button>
                             )}
                           </div>
@@ -290,45 +372,228 @@ export default function QueuePage() {
           </div>
         </div>
 
-        {/* Right 1 Column: Health Card */}
-        <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-6 self-start">
-          <div>
-            <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider">Worker Health</h3>
-            <p className="text-[10px] text-zinc-500 mt-0.5">Live diagnostics of the background dispatch process</p>
-          </div>
-
-          <div className="space-y-4 text-xs">
-            <div className={`p-4 rounded-lg border flex items-center justify-between font-bold ${
-              health.status === "healthy" 
-                ? "bg-emerald-50 border-emerald-100 text-emerald-700" 
-                : "bg-rose-50 border-rose-100 text-rose-700 animate-pulse"
-            }`}>
-              <div className="flex items-center gap-2">
-                <span className={`h-2.5 w-2.5 rounded-full ${health.status === "healthy" ? "bg-emerald-500" : "bg-rose-500"}`}></span>
-                Worker Status:
-              </div>
-              <span className="uppercase text-[10px] tracking-wider">
-                {health.status === "healthy" ? "Online" : "Offline"}
-              </span>
+        {/* Right 1 Column: Diagnostics Panel */}
+        <div className="lg:col-span-1 space-y-6">
+          
+          {/* Section: Operational Controls */}
+          <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
+            <div>
+              <h3 className="text-xs font-extrabold text-zinc-800 uppercase tracking-wider">Engine Controls</h3>
+              <p className="text-[10px] text-zinc-400">Pause background workers or enable queue draining</p>
             </div>
 
-            {health.status === "healthy" ? (
-              <div className="p-3 bg-zinc-50 border border-zinc-200/80 rounded-lg space-y-1.5 text-[10px] font-mono text-zinc-500">
-                <div><span className="font-semibold text-zinc-400">Heartbeat:</span> {new Date(health.last_heartbeat || "").toLocaleTimeString()}</div>
-                <div><span className="font-semibold text-zinc-400">Environment:</span> {process.env.NODE_ENV || "development"}</div>
+            <div className="space-y-3.5 pt-2">
+              {/* Control: Sending Worker */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-zinc-700">Outbox Dispatcher</span>
+                <button
+                  onClick={() => toggleWorkerControl("sending_worker_paused", !!diagnostics?.controls?.sending_worker_paused)}
+                  disabled={controlsLoading}
+                  className={`px-3 py-1.5 rounded-lg border font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm ${
+                    diagnostics?.controls?.sending_worker_paused
+                      ? "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100"
+                      : "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+                  }`}
+                >
+                  {diagnostics?.controls?.sending_worker_paused ? (
+                    <>
+                      <Pause className="w-3 h-3" /> Paused
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3 h-3" /> Running
+                    </>
+                  )}
+                </button>
               </div>
-            ) : (
-              <div className="p-3 bg-rose-50/50 border border-rose-100 rounded-lg text-[10px] font-semibold text-rose-700 space-y-1">
-                <div className="flex items-start gap-1">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                  <span>Durable sending daemon process is not running. Launch it using:</span>
-                </div>
-                <div className="bg-zinc-900 text-zinc-200 p-2 rounded mt-2 font-mono text-[9px] select-all">
-                  python -m app.services.durable_sending_worker
-                </div>
+
+              {/* Control: Generation Worker */}
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-zinc-700">AI Draft Generator</span>
+                <button
+                  onClick={() => toggleWorkerControl("generation_worker_paused", !!diagnostics?.controls?.generation_worker_paused)}
+                  disabled={controlsLoading}
+                  className={`px-3 py-1.5 rounded-lg border font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm ${
+                    diagnostics?.controls?.generation_worker_paused
+                      ? "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100"
+                      : "bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100"
+                  }`}
+                >
+                  {diagnostics?.controls?.generation_worker_paused ? (
+                    <>
+                      <Pause className="w-3 h-3" /> Paused
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3 h-3" /> Running
+                    </>
+                  )}
+                </button>
               </div>
-            )}
+
+              {/* Control: Queue Drain */}
+              <div className="flex items-center justify-between text-xs border-t border-zinc-100 pt-3">
+                <div className="flex flex-col">
+                  <span className="font-semibold text-zinc-700">Queue Draining</span>
+                  <span className="text-[9px] text-zinc-400">Finish existing, block new</span>
+                </div>
+                <button
+                  onClick={() => toggleWorkerControl("queue_drain_enabled", !!diagnostics?.controls?.queue_drain_enabled)}
+                  disabled={controlsLoading}
+                  className={`px-3 py-1.5 rounded-lg border font-bold text-[10px] uppercase tracking-wider flex items-center gap-1.5 transition-all shadow-sm ${
+                    diagnostics?.controls?.queue_drain_enabled
+                      ? "bg-amber-50 border-amber-200 text-amber-700 hover:bg-amber-100 animate-pulse"
+                      : "bg-zinc-50 border-zinc-200 text-zinc-600 hover:bg-zinc-100"
+                  }`}
+                >
+                  {diagnostics?.controls?.queue_drain_enabled ? "Enabled" : "Disabled"}
+                </button>
+              </div>
+            </div>
           </div>
+
+          {/* Section: Worker Heartbeats */}
+          <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
+            <div>
+              <h3 className="text-xs font-extrabold text-zinc-800 uppercase tracking-wider">Worker Heartbeats</h3>
+              <p className="text-[10px] text-zinc-400">Real-time status of backend tasks</p>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              {/* Sending Worker status */}
+              <div className="p-3 bg-zinc-50 border border-zinc-200/80 rounded-lg space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-zinc-600 flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-indigo-500" /> Outbox Daemon
+                  </span>
+                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
+                    diagnostics?.workers?.sending_worker?.status === "healthy"
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      : "bg-rose-100 text-rose-800 border border-rose-200"
+                  }`}>
+                    {diagnostics?.workers?.sending_worker?.status === "healthy" ? "Online" : "Offline"}
+                  </span>
+                </div>
+                {diagnostics?.workers?.sending_worker?.last_heartbeat && (
+                  <div className="text-[9px] font-mono text-zinc-400">
+                    Last Tick: {new Date(diagnostics.workers.sending_worker.last_heartbeat).toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+
+              {/* Generation Worker status */}
+              <div className="p-3 bg-zinc-50 border border-zinc-200/80 rounded-lg space-y-1.5">
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-zinc-600 flex items-center gap-1.5">
+                    <Cpu className="w-3.5 h-3.5 text-blue-500" /> Gen Daemon
+                  </span>
+                  <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-extrabold uppercase ${
+                    diagnostics?.workers?.generation_worker?.status === "healthy"
+                      ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
+                      : "bg-rose-100 text-rose-800 border border-rose-200"
+                  }`}>
+                    {diagnostics?.workers?.generation_worker?.status === "healthy" ? "Online" : "Offline"}
+                  </span>
+                </div>
+                {diagnostics?.workers?.generation_worker?.last_heartbeat && (
+                  <div className="text-[9px] font-mono text-zinc-400">
+                    Last Tick: {new Date(diagnostics.workers.generation_worker.last_heartbeat).toLocaleTimeString()}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Service Pings */}
+          <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
+            <div>
+              <h3 className="text-xs font-extrabold text-zinc-800 uppercase tracking-wider">Services Integration</h3>
+              <p className="text-[10px] text-zinc-400">Status of third-party APIs and connections</p>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between py-1 border-b border-zinc-50">
+                <span className="text-zinc-600 flex items-center gap-1.5">
+                  <Database className="w-3.5 h-3.5 text-zinc-400" /> Database Link
+                </span>
+                <span className={`font-bold ${diagnostics?.database?.status === "connected" ? "text-emerald-600" : "text-rose-600 animate-pulse"}`}>
+                  {diagnostics?.database?.status === "connected" ? "Connected" : "Disconnected"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-1 border-b border-zinc-50">
+                <span className="text-zinc-600 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-zinc-400" /> Gmail API Auth
+                </span>
+                <span className={`font-bold ${diagnostics?.gmail?.status === "connected" ? "text-emerald-600" : "text-rose-600"}`}>
+                  {diagnostics?.gmail?.status === "connected" ? "Authenticated" : "Disconnected"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between py-1">
+                <span className="text-zinc-600 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-zinc-400" /> Gemini AI Service
+                </span>
+                <span className={`font-bold ${
+                  diagnostics?.gemini?.status === "connected" 
+                    ? "text-emerald-600" 
+                    : diagnostics?.gemini?.status === "unconfigured" 
+                    ? "text-zinc-400" 
+                    : "text-rose-600"
+                }`}>
+                  {diagnostics?.gemini?.status === "connected" ? "Active" : diagnostics?.gemini?.status === "unconfigured" ? "Unconfigured" : "Failed"}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Section: Queue Metrics & DLQ */}
+          <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
+            <div>
+              <h3 className="text-xs font-extrabold text-zinc-800 uppercase tracking-wider">Metrics & Alerts</h3>
+              <p className="text-[10px] text-zinc-400">Queue health depth and dead-letter counts</p>
+            </div>
+
+            <div className="space-y-3.5 text-xs">
+              <div className="grid grid-cols-2 gap-2 text-center">
+                <div className="bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+                  <div className="text-lg font-black text-zinc-800">
+                    {diagnostics?.queues?.send_queue_pending || 0}
+                  </div>
+                  <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wide">Outbox Pending</div>
+                </div>
+                <div className="bg-zinc-50 p-2.5 rounded-lg border border-zinc-100">
+                  <div className="text-lg font-black text-zinc-800">
+                    {diagnostics?.queues?.generation_queue_pending || 0}
+                  </div>
+                  <div className="text-[9px] font-bold text-zinc-400 uppercase tracking-wide">Gen Pending</div>
+                </div>
+              </div>
+
+              {/* DLQ alerts if failures exist */}
+              {((diagnostics?.retries_and_failures?.dead_letter_count || 0) > 0 || (diagnostics?.stuck_jobs?.send_stuck_count || 0) > 0) ? (
+                <div className="p-3 bg-rose-50 border border-rose-100 rounded-lg space-y-2">
+                  <div className="flex items-center gap-1.5 text-rose-800 font-extrabold text-[10px] uppercase">
+                    <ShieldAlert className="w-4 h-4 text-rose-600" /> Action Required
+                  </div>
+                  <div className="text-[10px] text-rose-700 font-semibold space-y-1">
+                    {diagnostics?.retries_and_failures?.dead_letter_count > 0 && (
+                      <div>• {diagnostics.retries_and_failures.dead_letter_count} permanently failed items in Dead Letter.</div>
+                    )}
+                    {(diagnostics?.stuck_jobs?.send_stuck_count > 0 || diagnostics?.stuck_jobs?.generation_stuck_count > 0) && (
+                      <div>• Stuck jobs detected: send={diagnostics.stuck_jobs.send_stuck_count}, gen={diagnostics.stuck_jobs.generation_stuck_count}.</div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-3 bg-emerald-50/50 border border-emerald-100 rounded-lg flex items-center gap-2 text-[10px] text-emerald-800 font-bold">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  All queue operations healthy. No stuck items.
+                </div>
+              )}
+            </div>
+          </div>
+
         </div>
 
       </div>

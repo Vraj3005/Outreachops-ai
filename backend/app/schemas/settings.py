@@ -23,6 +23,9 @@ class OwnerSettingsBase(BaseModel):
     allowed_send_end: str = Field("17:00")
     required_footer: str | None = None
     banned_phrases: list[str] = Field(default_factory=list)
+    generation_worker_paused: bool = False
+    sending_worker_paused: bool = False
+    queue_drain_enabled: bool = False
 
     @model_validator(mode="after")
     def validate_hours_and_domain(self) -> "OwnerSettingsBase":

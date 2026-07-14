@@ -1,6 +1,7 @@
 import datetime
 import json
 import logging
+import os
 import random
 import threading
 import time
@@ -27,6 +28,10 @@ class GenerationWorker:
     _stop_event = threading.Event()
     worker_id = f"worker-{random.randint(1000, 9999)}"
     poll_interval = 1.0  # seconds
+    _heartbeat_path = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+        "worker_generation_heartbeat.json",
+    )
 
     @classmethod
     def start(cls):
@@ -60,12 +65,87 @@ class GenerationWorker:
         logger.info("Stopped generation background worker thread.")
 
     @classmethod
+    def _update_heartbeat(cls):
+        try:
+            hb_data = {
+                "status": "healthy",
+                "last_heartbeat": datetime.datetime.now(datetime.UTC).isoformat(),
+                "pid": os.getpid(),
+                "timestamp": time.time(),
+            }
+            with open(cls._heartbeat_path, "w") as f:
+                json.dump(hb_data, f)
+        except Exception as e:
+            logger.error(f"Failed to update worker generation heartbeat file: {e}")
+
+    @classmethod
+    def _should_skip_claiming(cls) -> bool:
+        try:
+            res = (
+                supabase.table("generation_job_items")
+                .select("job_id")
+                .eq("status", "pending")
+                .limit(1)
+                .execute()
+            )
+            if not res.data:
+                return False
+            job_id = res.data[0]["job_id"]
+            job_res = (
+                supabase.table("generation_jobs")
+                .select("user_id")
+                .eq("id", job_id)
+                .execute()
+            )
+            if not job_res.data:
+                return False
+            user_id = job_res.data[0]["user_id"]
+
+            from app.services.worker_control_service import WorkerControlService
+
+            if WorkerControlService.is_generation_worker_paused(user_id):
+                return True
+            if WorkerControlService.is_queue_drain_enabled(user_id):
+                return True
+        except Exception as e:
+            logger.warning(f"Error checking generation worker skip status: {e}")
+        return False
+
+    @classmethod
+    def get_health_status(cls) -> dict[str, Any]:
+        """Reads local heartbeat file to confirm worker status."""
+        try:
+            if os.path.exists(cls._heartbeat_path):
+                with open(cls._heartbeat_path) as f:
+                    hb = json.load(f)
+                age = time.time() - hb.get("timestamp", 0)
+                if age < 15:  # Within 15 seconds is healthy
+                    return {
+                        "status": "healthy",
+                        "last_heartbeat": hb.get("last_heartbeat"),
+                    }
+            return {
+                "status": "offline",
+                "reason": "No active heartbeat registered within bounds",
+            }
+        except Exception as e:
+            return {"status": "error", "reason": str(e)}
+
+    @classmethod
     def _run_worker_loop(cls):
         """
         Main worker execution loop.
         """
         while not cls._stop_event.is_set():
             try:
+                # Update heartbeat at start of loop iteration
+                cls._update_heartbeat()
+
+                # Check if paused or draining queue
+                if cls._should_skip_claiming():
+                    time.sleep(cls.poll_interval)
+                    continue
+
                 # 1. Attempt to claim next pending item safely
                 item = cls._claim_next_item()
                 if item:

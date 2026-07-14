@@ -49,15 +49,37 @@ def is_safe_ip(ip_str: str) -> bool:
 
 def resolve_safe_ips(hostname: str) -> list[str]:
     """
-    Resolves a hostname to its IP addresses, filtering out unsafe ranges.
+    Resolves a hostname to its IP addresses, filtering out unsafe ranges,
+    with an explicit 5-second timeout using a background thread.
     """
-    try:
-        addr_info = socket.getaddrinfo(hostname, None)
-        ips = list(set(info[4][0] for info in addr_info))
-        return [ip for ip in ips if is_safe_ip(ip)]
-    except Exception as e:
-        logger.warning(f"DNS resolution failed for hostname {hostname}: {e}")
+    import threading
+    res_list = []
+    exc_list = []
+
+    def worker():
+        try:
+            addr_info = socket.getaddrinfo(hostname, None)
+            res_list.append(addr_info)
+        except Exception as e:
+            exc_list.append(e)
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    thread.join(timeout=5.0)
+
+    if thread.is_alive():
+        logger.warning(f"DNS resolution timed out for hostname: {hostname}")
         return []
+
+    if exc_list:
+        logger.warning(f"DNS resolution failed for hostname {hostname}: {exc_list[0]}")
+        return []
+
+    if not res_list:
+        return []
+
+    ips = list(set(info[4][0] for info in res_list[0]))
+    return [ip for ip in ips if is_safe_ip(ip)]
 
 
 @contextmanager
@@ -83,11 +105,12 @@ def pinned_dns(hostname: str, ip: str):
 # --- Safe Page Fetcher ---
 
 
-def safe_fetch(url: str, max_size: int = 500000, timeout: int = 5) -> str:
+def safe_fetch(url: str, max_size: int = 500000, timeout: int = 10) -> str:
     """
     SSRF & Rebinding Safe Web Fetcher.
     Streams output up to max_size, validates MIME type, and re-resolves manual redirects.
     """
+    timeout = min(timeout, 10)
     parsed = urlparse(url)
     if parsed.scheme not in ["http", "https"]:
         raise ValueError(

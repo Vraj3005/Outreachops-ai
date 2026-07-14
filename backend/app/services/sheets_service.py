@@ -52,7 +52,9 @@ class SheetsService:
                     creds = Credentials.from_service_account_info(
                         creds_info, scopes=scopes
                     )
-                    return gspread.authorize(creds)
+                    client = gspread.authorize(creds)
+                    client.set_timeout(15.0)
+                    return client
         except Exception as e:
             logger.warning(
                 f"Failed to load Sheets service account from DB: {e}. Checking local file..."
@@ -67,7 +69,9 @@ class SheetsService:
             creds = Credentials.from_service_account_file(
                 self.creds_path, scopes=scopes
             )
-            return gspread.authorize(creds)
+            client = gspread.authorize(creds)
+            client.set_timeout(15.0)
+            return client
         except Exception as e:
             logger.error(f"Google Sheets OAuth authorization failed: {e}")
             raise MissingCredentialsError(

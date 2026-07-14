@@ -834,6 +834,15 @@ class SQLiteSupabaseClient:
         self._add_column_if_missing(
             cursor, "owner_settings", "default_target_audience", "TEXT"
         )
+        self._add_column_if_missing(
+            cursor, "owner_settings", "generation_worker_paused", "INTEGER", "0"
+        )
+        self._add_column_if_missing(
+            cursor, "owner_settings", "sending_worker_paused", "INTEGER", "0"
+        )
+        self._add_column_if_missing(
+            cursor, "owner_settings", "queue_drain_enabled", "INTEGER", "0"
+        )
 
         # Alter Generation Jobs Table
         self._add_column_if_missing(cursor, "generation_jobs", "total", "INTEGER", "0")
@@ -1086,7 +1095,9 @@ def init_db() -> Any:
     # Try initializing Supabase client first
     if url and key:
         try:
-            client = create_client(url, key)
+            from supabase import ClientOptions
+            options = ClientOptions(postgrest_client_timeout=15.0, storage_client_timeout=15.0)
+            client = create_client(url, key, options=options)
             # Test query to check if 'leads' table exists
             client.table("leads").select("id").limit(1).execute()
             logger.info("✅ Supabase client initialized and verified successfully")

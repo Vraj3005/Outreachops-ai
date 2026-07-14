@@ -125,6 +125,17 @@ class DurableSendingWorker:
         # Process a batch size of up to 5 at a time
         batch = due_candidates[:5]
         for job in batch:
+            # Check if sending worker is paused or queue draining is active
+            user_id = job.get("user_id")
+            if user_id:
+                from app.services.worker_control_service import WorkerControlService
+                if WorkerControlService.is_sending_worker_paused(user_id):
+                    logger.debug(f"Sending worker is paused for user {user_id}; skipping dispatch.")
+                    continue
+                if WorkerControlService.is_queue_drain_enabled(user_id):
+                    logger.debug(f"Queue drain is enabled for user {user_id}; skipping dispatch.")
+                    continue
+
             # Atomic claim status transition check
             claim_res = (
                 supabase.table("scheduled_emails")

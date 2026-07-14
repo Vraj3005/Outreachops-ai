@@ -53,7 +53,7 @@ class GeminiService:
                 message="Gemini API Key is not configured. Add GEMINI_API_KEY to environment or configure it in settings."
             )
         try:
-            return genai.Client(api_key=api_key)
+            return genai.Client(api_key=api_key, http_options={"timeout": 30.0})
         except Exception as e:
             logger.error(f"Failed to initialize Gemini GenAI Client: {e}")
             raise GeminiQuotaError(

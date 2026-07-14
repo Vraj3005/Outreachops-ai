@@ -218,7 +218,9 @@ class GmailService:
             )
 
         creds = self._get_db_credentials(user_id)
-        return build("gmail", "v1", credentials=creds)
+        import httplib2
+        http_client = httplib2.Http(timeout=15.0)
+        return build("gmail", "v1", credentials=creds, http=http_client)
 
     def is_valid_email(self, email: str) -> bool:
         if not email:
