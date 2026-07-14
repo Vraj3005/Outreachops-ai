@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Any, Dict
+from typing import Any
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -170,7 +170,7 @@ def setup_structured_logging():
     Initializes structured logging configuration on stdout and sets default levels.
     """
     root_logger = logging.getLogger()
-    
+
     # Remove existing handlers to avoid duplicates
     for handler in list(root_logger.handlers):
         root_logger.removeHandler(handler)
@@ -179,10 +179,10 @@ def setup_structured_logging():
     handler = logging.StreamHandler()
     handler.setFormatter(StructuredJSONFormatter())
     root_logger.addHandler(handler)
-    
+
     # Set default level (INFO) or via settings
     root_logger.setLevel(logging.INFO)
-    
+
     # Suppress verbose loggers from libraries
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
     logging.getLogger("googleapiclient.discovery").setLevel(logging.WARNING)

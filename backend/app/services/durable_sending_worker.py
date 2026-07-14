@@ -129,11 +129,16 @@ class DurableSendingWorker:
             user_id = job.get("user_id")
             if user_id:
                 from app.services.worker_control_service import WorkerControlService
+
                 if WorkerControlService.is_sending_worker_paused(user_id):
-                    logger.debug(f"Sending worker is paused for user {user_id}; skipping dispatch.")
+                    logger.debug(
+                        f"Sending worker is paused for user {user_id}; skipping dispatch."
+                    )
                     continue
                 if WorkerControlService.is_queue_drain_enabled(user_id):
-                    logger.debug(f"Queue drain is enabled for user {user_id}; skipping dispatch.")
+                    logger.debug(
+                        f"Queue drain is enabled for user {user_id}; skipping dispatch."
+                    )
                     continue
 
             # Atomic claim status transition check

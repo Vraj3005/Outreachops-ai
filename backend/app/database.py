@@ -155,8 +155,13 @@ class SQLiteQueryBuilder:
                 if self.filters:
                     where_clauses = []
                     for col, op, val in self.filters:
-                        where_clauses.append(f"{col} {op} ?")
-                        params.append(val)
+                        if op.lower() == "in":
+                            placeholders = ",".join(["?"] * len(val))
+                            where_clauses.append(f"{col} IN ({placeholders})")
+                            params.extend(val)
+                        else:
+                            where_clauses.append(f"{col} {op} ?")
+                            params.append(val)
                     sql += " WHERE " + " AND ".join(where_clauses)
 
                 if self.orders:
@@ -174,10 +179,15 @@ class SQLiteQueryBuilder:
                 if self.count_mode == "exact" or "count" in self.select_fields:
                     count_sql = f"SELECT COUNT(*) FROM {self.table_name}"
                     if self.filters:
-                        count_sql += " WHERE " + " AND ".join(
-                            [f"{col} {op} ?" for col, op, _ in self.filters]
-                        )
-                    cursor.execute(count_sql, params[: len(self.filters)])
+                        count_clauses = []
+                        for col, op, val in self.filters:
+                            if op.lower() == "in":
+                                placeholders = ",".join(["?"] * len(val))
+                                count_clauses.append(f"{col} IN ({placeholders})")
+                            else:
+                                count_clauses.append(f"{col} {op} ?")
+                        count_sql += " WHERE " + " AND ".join(count_clauses)
+                    cursor.execute(count_sql, params)
                     count_val = cursor.fetchone()[0]
 
                 return SQLiteSupabaseResult(data, count_val)
@@ -1096,7 +1106,10 @@ def init_db() -> Any:
     if url and key:
         try:
             from supabase import ClientOptions
-            options = ClientOptions(postgrest_client_timeout=15.0, storage_client_timeout=15.0)
+
+            options = ClientOptions(
+                postgrest_client_timeout=15.0, storage_client_timeout=15.0
+            )
             client = create_client(url, key, options=options)
             # Test query to check if 'leads' table exists
             client.table("leads").select("id").limit(1).execute()

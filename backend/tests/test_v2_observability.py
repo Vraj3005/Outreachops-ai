@@ -3,14 +3,14 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.services.error_service import (
-    OutreachOpsException,
-    GmailAuthExpiredError,
     GeminiQuotaError,
+    GmailAuthExpiredError,
+    OutreachOpsException,
     OutreachOpsTimeoutError,
 )
-from app.utils.logging import redact_data
-from app.services.worker_control_service import WorkerControlService
 from app.services.website_research_service import resolve_safe_ips
+from app.services.worker_control_service import WorkerControlService
+from app.utils.logging import redact_data
 
 
 def test_logging_redaction():
@@ -85,7 +85,9 @@ def test_dns_resolution_timeout():
     assert isinstance(ips, list)
 
     # Test invalid host
-    ips_invalid = resolve_safe_ips("nonexistent-domain-name-testing-dns-timeout-123.com")
+    ips_invalid = resolve_safe_ips(
+        "nonexistent-domain-name-testing-dns-timeout-123.com"
+    )
     assert ips_invalid == []
 
 

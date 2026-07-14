@@ -101,20 +101,27 @@ class GeminiService:
                 or "scheduling" in prompt_lower
                 or "dispatch" in prompt_lower
             ):
-                subject = "Operational efficiency suggestions"
+                subject = "[DEMO MOCK] Streamlining operations"
                 body = (
-                    "Hi there,\n\nI was looking at your construction operations and noticed that managing "
-                    "subcontractor schedules manually can lead to conflicts.\n\nImplementing a centralized "
-                    "job scheduling dashboard would help streamline dispatch and keep everyone in sync.\n\n"
+                    "[DEMO MOCK DATA]\n\nHi there,\n\nI noticed that managing schedules manually "
+                    "can cause operational overhead and delays.\n\nImplementing a centralized workflow "
+                    "automation dashboard would help streamline tracking and keep everyone in sync.\n\n"
                     "Would you be open to a brief chat next week to see how this works?\n\nBest,\nAdmin"
                 )
-            else:
-                subject = "Improving website conversions"
+            elif "marketing" in prompt_lower or "outreach" in prompt_lower:
+                subject = "[DEMO MOCK] Question about customer acquisition"
                 body = (
-                    "Hi there,\n\nI was reviewing your website and noticed some mobile layout shifts "
-                    "that might be hurting your visitor conversions.\n\nOptimizing your mobile page speeds "
-                    "and fixing those layout shifts could help retain more prospects.\n\nWould you be open "
-                    "to a quick call about this?\n\nBest,\nAdmin"
+                    "[DEMO MOCK DATA]\n\nHi there,\n\nI was looking at your outbound marketing approach "
+                    "and wanted to suggest a few adjustments to your B2B lead capture process to improve conversion rates.\n\n"
+                    "Let me know if you have 5 minutes for a quick chat next week.\n\nBest,\nAdmin"
+                )
+            else:
+                subject = "[DEMO MOCK] Improving website conversions"
+                body = (
+                    "[DEMO MOCK DATA]\n\nHi there,\n\nI was reviewing your website and noticed some mobile "
+                    "layout shifts and speed optimization opportunities that could be hurting your conversions.\n\n"
+                    "Fixing those layout shifts could help retain more active prospects.\n\n"
+                    "Would you be open to a quick call about this?\n\nBest,\nAdmin"
                 )
             return {
                 "subject": subject,
@@ -294,10 +301,41 @@ class GeminiService:
         )
 
         if settings.DEMO_MODE and not self.api_key and not user_id:
+            prompt_lower = prompt.lower()
+            if (
+                "erp" in prompt_lower
+                or "scheduling" in prompt_lower
+                or "dispatch" in prompt_lower
+            ):
+                subject = "[DEMO MOCK] Streamlining operations"
+                body = (
+                    "[DEMO MOCK DATA]\n\nHi there,\n\nI noticed that managing schedules manually "
+                    "can cause operational overhead and delays.\n\nImplementing a centralized workflow "
+                    "automation dashboard would help streamline tracking and keep everyone in sync.\n\n"
+                    "Would you be open to a brief chat next week to see how this works?\n\nBest,\nAdmin"
+                )
+                reasoning = "Analyzed operational workflow constraints and suggested automated dashboard solutions."
+            elif "marketing" in prompt_lower or "outreach" in prompt_lower:
+                subject = "[DEMO MOCK] Customer acquisition questions"
+                body = (
+                    "[DEMO MOCK DATA]\n\nHi there,\n\nI was looking at your outbound marketing approach "
+                    "and wanted to suggest a few adjustments to your B2B lead capture process to improve conversion rates.\n\n"
+                    "Let me know if you have 5 minutes for a quick chat next week.\n\nBest,\nAdmin"
+                )
+                reasoning = "Reviewed outbound pipeline conversion rates and drafted personalized copy enhancements."
+            else:
+                subject = "[DEMO MOCK] Improving website conversions"
+                body = (
+                    "[DEMO MOCK DATA]\n\nHi there,\n\nI was reviewing your website and noticed some mobile "
+                    "layout shifts and speed optimization opportunities that could be hurting your conversions.\n\n"
+                    "Fixing those layout shifts could help retain more active prospects.\n\n"
+                    "Would you be open to a quick call about this?\n\nBest,\nAdmin"
+                )
+                reasoning = "Checked site load speeds and layout shifts to construct targeted optimization suggestions."
             return {
-                "subject": "Operational efficiency improvements",
-                "body": "Hello,\n\n spreadsheets are slow. We recommend custom modules.\n\nBest,\nAdmin",
-                "reasoning": "Demo fallback reasoning",
+                "subject": subject,
+                "body": body,
+                "reasoning": reasoning,
                 "warnings": [],
                 "model_used": "gemini-mock-demo",
             }

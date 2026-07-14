@@ -46,7 +46,7 @@ from app.utils.logging import LoggingMiddleware, setup_structured_logging
 async def lifespan(app: FastAPI):
     # Initialize structured JSON logging
     setup_structured_logging()
-    
+
     # Startup actions
     init_db()
 

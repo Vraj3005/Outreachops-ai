@@ -11,6 +11,22 @@ def test_classify_genuine_reply(mocker):
     mock_supabase = mocker.MagicMock()
     mocker.patch("app.services.reply_classification_service.supabase", mock_supabase)
 
+    # Mock GeminiService client interaction
+    mock_gemini = mocker.MagicMock()
+    mock_gemini.api_key = "test-key"
+    mock_gemini.model_list = ["gemini-2.5-flash-lite"]
+    mock_client = mocker.MagicMock()
+    mock_gemini._get_client.return_value = mock_client
+
+    mock_response = mocker.MagicMock()
+    mock_response.text = '{"category": "positive/interested", "confidence": 0.9, "explanation": "Interested client"}'
+    mock_client.models.generate_content.return_value = mock_response
+
+    mocker.patch(
+        "app.services.reply_classification_service.GeminiService",
+        return_value=mock_gemini,
+    )
+
     # Classify a standard body response
     res = ReplyClassificationService.classify_and_process(
         user_id="user-1",

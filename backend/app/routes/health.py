@@ -68,6 +68,7 @@ async def diagnostics_check(owner: dict = Depends(require_owner)) -> dict[str, A
 
     # 3. Gmail Integration Connection State
     from app.services.gmail_service import GmailService
+
     try:
         gmail_service = GmailService()
         gmail_connection = gmail_service.check_connection_status(user_id)
@@ -75,8 +76,9 @@ async def diagnostics_check(owner: dict = Depends(require_owner)) -> dict[str, A
         gmail_connection = {"status": "error", "details": str(e)}
 
     # 4. AI Provider (Gemini) Connection Check
-    from app.services.gemini_service import GeminiService
     import requests
+
+    from app.services.gemini_service import GeminiService
 
     ai_status = "unconfigured"
     ai_details = None
@@ -114,39 +116,84 @@ async def diagnostics_check(owner: dict = Depends(require_owner)) -> dict[str, A
     if supabase:
         try:
             # Gen Queue
-            res_gen_p = supabase.table("generation_job_items").select("count", count="exact").eq("status", "pending").execute()
+            res_gen_p = (
+                supabase.table("generation_job_items")
+                .select("count", count="exact")
+                .eq("status", "pending")
+                .execute()
+            )
             gen_queue_pending = res_gen_p.count or 0
-            
-            res_gen_pr = supabase.table("generation_job_items").select("count", count="exact").eq("status", "processing").execute()
+
+            res_gen_pr = (
+                supabase.table("generation_job_items")
+                .select("count", count="exact")
+                .eq("status", "processing")
+                .execute()
+            )
             gen_queue_processing = res_gen_pr.count or 0
 
             # Send Queue
-            res_send_p = supabase.table("scheduled_emails").select("count", count="exact").eq("status", "pending").execute()
+            res_send_p = (
+                supabase.table("scheduled_emails")
+                .select("count", count="exact")
+                .eq("status", "pending")
+                .execute()
+            )
             send_queue_pending = res_send_p.count or 0
-            
-            res_send_pr = supabase.table("scheduled_emails").select("count", count="exact").eq("status", "processing").execute()
+
+            res_send_pr = (
+                supabase.table("scheduled_emails")
+                .select("count", count="exact")
+                .eq("status", "processing")
+                .execute()
+            )
             send_queue_processing = res_send_pr.count or 0
 
             # Stuck jobs (> 1 hour in processing)
-            one_hour_ago = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1)).isoformat()
-            res_stuck_g = supabase.table("generation_job_items").select("count", count="exact").eq("status", "processing").lt("updated_at", one_hour_ago).execute()
+            one_hour_ago = (
+                datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=1)
+            ).isoformat()
+            res_stuck_g = (
+                supabase.table("generation_job_items")
+                .select("count", count="exact")
+                .eq("status", "processing")
+                .lt("updated_at", one_hour_ago)
+                .execute()
+            )
             stuck_gen_jobs = res_stuck_g.count or 0
 
-            res_stuck_s = supabase.table("scheduled_emails").select("count", count="exact").eq("status", "processing").lt("updated_at", one_hour_ago).execute()
+            res_stuck_s = (
+                supabase.table("scheduled_emails")
+                .select("count", count="exact")
+                .eq("status", "processing")
+                .lt("updated_at", one_hour_ago)
+                .execute()
+            )
             stuck_send_jobs = res_stuck_s.count or 0
 
             # Retries
-            res_ret = supabase.table("scheduled_emails").select("count", count="exact").eq("status", "retry").execute()
+            res_ret = (
+                supabase.table("scheduled_emails")
+                .select("count", count="exact")
+                .eq("status", "retry")
+                .execute()
+            )
             retry_count = res_ret.count or 0
 
             # DLQ (failed sending jobs)
-            res_dlq = supabase.table("scheduled_emails").select("count", count="exact").eq("status", "failed").execute()
+            res_dlq = (
+                supabase.table("scheduled_emails")
+                .select("count", count="exact")
+                .eq("status", "failed")
+                .execute()
+            )
             dlq_count = res_dlq.count or 0
         except Exception as e:
             logger.error(f"Failed to query diagnostic queue stats: {e}")
 
     # 6. Worker controls
     from app.services.worker_control_service import WorkerControlService
+
     controls = WorkerControlService.get_controls(user_id)
 
     return {

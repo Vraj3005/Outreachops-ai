@@ -1,203 +1,122 @@
-# OutreachOps AI — API Documentation
+# OutreachOps AI — API Reference
 
-This document describes the REST API endpoints provided by the FastAPI backend of OutreachOps AI.
-
-## Base URL
-- Local development: `http://localhost:8000`
-- Render production: `https://outreachops-api.onrender.com` (example)
+This document describes the FastAPI REST API v2 endpoints, request parameters, response payloads, and authentication.
 
 ---
 
-## 1. Leads Integration
+## 1. Authentication
+All API endpoints require client authentication using a Bearer token:
+* **Header**: `Authorization: Bearer <token>`
+* In **Demo Mode**, setting the header value to `Bearer mock-owner-token` bypasses remote server checks.
 
-### Import Leads from Google Sheet
-* **Endpoint**: `POST /integrations/sheets/import`
-* **Description**: Triggers Google Sheets synchronization. Connects to the configured sheet/tab, checks for duplicate contacts, and imports new rows.
-* **Authentication**: Bearer Token (Supabase JWT)
+---
+
+## 2. Ingestion & Mapping API
+
+### Preview Imported spreadsheet Rows
+* **Endpoint**: `POST /api/v1/imports/preview`
+* **Description**: Parses an uploaded file to preview columns and data rows before committing them.
+* **Payload**: Form data with file attachment.
 * **Response**:
   ```json
   {
-    "imported": 5,
-    "skipped_duplicates": 2,
-    "total_processed": 7
+    "filename": "leads.csv",
+    "headers": ["First Name", "Email", "Company", "Website"],
+    "row_count": 250,
+    "preview_rows": [
+      ["John", "john@example.com", "Apex Inc", "apex.com"]
+    ]
   }
   ```
 
-### List Leads
-* **Endpoint**: `GET /leads`
-* **Description**: Lists all leads for the authenticated user.
-* **Query Parameters**:
-  - `status`: Filter by lead status (e.g., `Pending`, `Contacted`)
-  - `has_email`: Filter leads that have a valid email address (`true` / `false`)
+---
+
+## 3. Settings & Controls API
+
+### Retrieve Owner Settings & Controls
+* **Endpoint**: `GET /api/v1/settings`
 * **Response**:
   ```json
-  [
-    {
-      "id": "uuid-123",
-      "company_name": "Apex Roofing Solutions",
-      "website": "apex-roofing-mock.com",
-      "contact_email": "demo@example.com",
-      "website_pain_points": "Slow contact forms",
-      "erp_approach": "centralized scheduling",
-      "lead_status": "Pending",
-      "created_at": "2026-06-19T18:00:00Z"
+  {
+    "owner_id": "owner-uuid-123",
+    "business_name": "Pitbull Corporations",
+    "website": "https://pitbullcorporations.com",
+    "sender_name": "Rohit",
+    "sender_email": "yash69699696@gmail.com",
+    "daily_send_limit": 50,
+    "minimum_send_spacing_seconds": 60,
+    "allowed_send_start": "09:00",
+    "allowed_send_end": "17:00",
+    "generation_worker_paused": false,
+    "sending_worker_paused": false,
+    "queue_drain_enabled": false,
+    "banned_phrases": ["free offering", "guarantee click"]
+  }
+  ```
+
+### Update Owner Settings & Controls
+* **Endpoint**: `PATCH /api/v1/settings`
+* **Payload**:
+  ```json
+  {
+    "generation_worker_paused": true,
+    "sending_worker_paused": false,
+    "queue_drain_enabled": true
+  }
+  ```
+* **Response**: Returns the updated settings object.
+
+---
+
+## 4. Diagnostics & Observability API
+
+### Detailed Engine Diagnostics
+* **Endpoint**: `GET /api/v1/health/diagnostics`
+* **Description**: Restricted to authenticated owners. Returns full status of heartbeats, queues, and integration status.
+* **Response**:
+  ```json
+  {
+    "timestamp": "2026-07-14T10:10:53.838779+00:00",
+    "database": {
+      "status": "connected",
+      "details": "Verification successful"
+    },
+    "workers": {
+      "sending_worker": {
+        "status": "healthy",
+        "last_heartbeat": "2026-07-14T10:10:53+00:00"
+      },
+      "generation_worker": {
+        "status": "healthy",
+        "last_heartbeat": "2026-07-14T10:10:53+00:00"
+      }
+    },
+    "gmail": {
+      "status": "connected",
+      "details": "OAuth tokens verified successfully"
+    },
+    "gemini": {
+      "status": "connected",
+      "details": "Gemini API verification check succeeded."
+    },
+    "queues": {
+      "generation_queue_pending": 0,
+      "generation_queue_processing": 0,
+      "send_queue_pending": 0,
+      "send_queue_processing": 0
+    },
+    "stuck_jobs": {
+      "generation_stuck_count": 0,
+      "send_stuck_count": 0
+    },
+    "retries_and_failures": {
+      "retry_count": 0,
+      "dead_letter_count": 0
+    },
+    "controls": {
+      "generation_worker_paused": false,
+      "sending_worker_paused": false,
+      "queue_drain_enabled": false
     }
-  ]
-  ```
-
----
-
-## 2. Drafts Generation
-
-### Generate Personalizations
-* **Endpoint**: `POST /drafts/generate`
-* **Description**: Generates AI-personalized emails using Gemini API based on active templates.
-* **Request Body**:
-  ```json
-  {
-    "lead_ids": ["uuid-123"],
-    "email_types": ["website", "erp"],
-    "regenerate": false
   }
-  ```
-* **Response**:
-  ```json
-  {
-    "success": true,
-    "generated_count": 2,
-    "errors": []
-  }
-  ```
-
-### List Draft Review Queue
-* **Endpoint**: `GET /drafts`
-* **Description**: Retrieves draft emails filtered by status or email type.
-* **Query Parameters**:
-  - `status`: Filter by status (`draft`, `approved`, `sent`, `failed`, `rejected`)
-  - `email_type`: Filter by type (`website`, `erp`, `follow_up`)
-* **Response**:
-  ```json
-  [
-    {
-      "id": "draft-uuid-456",
-      "lead_id": "uuid-123",
-      "email_type": "website",
-      "subject": "Quick fix for Apex Roofing Solutions site",
-      "body": "Hi there, I noticed your contact form...",
-      "status": "draft",
-      "ai_model": "gemini-2.5-flash-lite",
-      "quality_score": 88,
-      "spam_risk_score": 12,
-      "personalization_score": 90,
-      "clarity_score": 85
-    }
-  ]
-  ```
-
----
-
-## 3. Review & Approval Workflows
-
-### Approve Draft
-* **Endpoint**: `POST /drafts/{id}/approve`
-* **Description**: Marks the draft status as `approved`, preparing it for dispatch.
-* **Response**:
-  ```json
-  {
-    "success": true,
-    "status": "approved"
-  }
-  ```
-
-### Reject Draft
-* **Endpoint**: `POST /drafts/{id}/reject`
-* **Description**: Rejects a draft and updates status to `rejected`.
-* **Response**:
-  ```json
-  {
-    "success": true,
-    "status": "rejected"
-  }
-  ```
-
-### Dispatch Single Draft
-* **Endpoint**: `POST /drafts/{id}/send`
-* **Description**: Immediately validates safety rules and sends a single approved email via the Gmail API.
-* **Response**:
-  ```json
-  {
-    "status": "success",
-    "gmail_message_id": "gmail-msg-id-xyz"
-  }
-  ```
-
-### Dispatch All Approved Drafts
-* **Endpoint**: `POST /emails/send-approved`
-* **Description**: Standard background queue process to dispatch all approved drafts while enforcing daily quotas and delays.
-* **Response**:
-  ```json
-  {
-    "processed_count": 10,
-    "sent": 8,
-    "failed": 2
-  }
-  ```
-
----
-
-## 4. Telemetry & Analytics
-
-### Dashboard Summary
-* **Endpoint**: `GET /analytics/summary`
-* **Description**: Returns all KPI counters for display on the main dashboard cards.
-* **Response**:
-  ```json
-  {
-    "total_leads": 120,
-    "total_drafts": 240,
-    "pending_drafts": 15,
-    "approved_drafts": 8,
-    "sent_today": 12,
-    "failed_today": 1,
-    "website_emails_sent": 85,
-    "erp_emails_sent": 74,
-    "daily_limit": 50,
-    "remaining_today": 38,
-    "approval_rate": 84.5,
-    "failure_rate": 1.2
-  }
-  ```
-
----
-
-## 5. Safety & Opt-Outs
-
-### Add to Do Not Contact (DNC) List
-* **Endpoint**: `POST /do-not-contact`
-* **Request Body**:
-  ```json
-  {
-    "email": "optout@target.com",
-    "reason": "Requested unsubscribe"
-  }
-  ```
-* **Response**:
-  ```json
-  {
-    "success": true,
-    "message": "Email added to DNC list."
-  }
-  ```
-
-### List DNC Registry
-* **Endpoint**: `GET /do-not-contact`
-* **Response**:
-  ```json
-  [
-    {
-      "email": "optout@target.com",
-      "reason": "Requested unsubscribe",
-      "created_at": "2026-06-19T18:00:00Z"
-    }
-  ]
   ```

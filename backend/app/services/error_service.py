@@ -65,7 +65,9 @@ class OutreachOpsTimeoutError(OutreachOpsException):
 
 
 class ConnectionFailedError(OutreachOpsException):
-    def __init__(self, message: str = "Connection to service failed", details: dict = None):
+    def __init__(
+        self, message: str = "Connection to service failed", details: dict = None
+    ):
         super().__init__(
             message, status_code=502, details=details, error_code="CONNECTION_FAILED"
         )

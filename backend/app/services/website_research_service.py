@@ -53,6 +53,7 @@ def resolve_safe_ips(hostname: str) -> list[str]:
     with an explicit 5-second timeout using a background thread.
     """
     import threading
+
     res_list = []
     exc_list = []
 
@@ -256,6 +257,24 @@ class WebsiteResearchService:
             "https://"
         ):
             normalized_url = "https://" + normalized_url
+
+        # Check Demo Mode bypass
+        from app.config import settings
+
+        if settings.DEMO_MODE:
+            logger.info("Demo Mode: Returning mock website research snapshot")
+            return {
+                "summary": "[DEMO MOCK DATA] This is a mock research summary of the lead website describing core workflow optimization opportunities.",
+                "personalization_facts": [
+                    "[DEMO MOCK] Employs standard design standards.",
+                    "[DEMO MOCK] Outbound email address identified: contact@lead.com.",
+                    "[DEMO MOCK] Recently added mobile responsive menus.",
+                ],
+                "campaign_relevance": "Highly relevant for design and process consulting services.",
+                "uncertainty_warnings": ["Demo mode simulation active."],
+                "sources": [normalized_url],
+                "timestamp": datetime.utcnow().isoformat(),
+            }
 
         # 1. Caching check (within 7 days)
         if not refresh:

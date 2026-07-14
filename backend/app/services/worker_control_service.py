@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict
+from typing import Any
 
 from app.database import supabase
 from app.routes.settings import get_owner_settings_sync
@@ -14,15 +14,19 @@ class WorkerControlService:
     """
 
     @classmethod
-    def get_controls(cls, user_id: str) -> Dict[str, bool]:
+    def get_controls(cls, user_id: str) -> dict[str, bool]:
         """
         Retrieves the current worker controls.
         """
         try:
             settings = get_owner_settings_sync(user_id)
             return {
-                "generation_worker_paused": bool(settings.get("generation_worker_paused", False)),
-                "sending_worker_paused": bool(settings.get("sending_worker_paused", False)),
+                "generation_worker_paused": bool(
+                    settings.get("generation_worker_paused", False)
+                ),
+                "sending_worker_paused": bool(
+                    settings.get("sending_worker_paused", False)
+                ),
                 "queue_drain_enabled": bool(settings.get("queue_drain_enabled", False)),
             }
         except Exception as e:
@@ -52,11 +56,11 @@ class WorkerControlService:
         generation_worker_paused: bool | None = None,
         sending_worker_paused: bool | None = None,
         queue_drain_enabled: bool | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Updates worker control flags in the database.
         """
-        payload: Dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         if generation_worker_paused is not None:
             payload["generation_worker_paused"] = 1 if generation_worker_paused else 0
         if sending_worker_paused is not None:
@@ -75,20 +79,29 @@ class WorkerControlService:
                 .eq("owner_id", user_id)
                 .execute()
             )
-            
+
             if res.data:
                 # Update
-                supabase.table("owner_settings").update(payload).eq("owner_id", user_id).execute()
+                supabase.table("owner_settings").update(payload).eq(
+                    "owner_id", user_id
+                ).execute()
             else:
                 # Insert defaults plus updates
                 from app.routes.settings import get_default_owner_settings
+
                 full_payload = get_default_owner_settings(user_id)
                 for k, v in payload.items():
                     full_payload[k] = v
                 # SQLite serialization compat check
-                if not hasattr(supabase, "table_name") and "banned_phrases" in full_payload:
+                if (
+                    not hasattr(supabase, "table_name")
+                    and "banned_phrases" in full_payload
+                ):
                     import json
-                    full_payload["banned_phrases"] = json.dumps(full_payload["banned_phrases"])
+
+                    full_payload["banned_phrases"] = json.dumps(
+                        full_payload["banned_phrases"]
+                    )
                 supabase.table("owner_settings").insert(full_payload).execute()
 
             logger.info(f"Updated worker controls for {user_id}: {payload}")
