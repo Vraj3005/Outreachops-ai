@@ -1,5 +1,6 @@
 import json
 import logging
+import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -16,6 +17,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 
 def get_default_owner_settings(owner_id: str) -> dict[str, Any]:
     return {
+        "id": str(uuid.uuid4()),
         "owner_id": owner_id,
         "business_name": settings.YOUR_AGENCY_NAME,
         "website": settings.YOUR_WEBSITE,
