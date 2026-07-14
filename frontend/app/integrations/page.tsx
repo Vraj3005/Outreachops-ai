@@ -26,7 +26,7 @@ export default function IntegrationsPage() {
 
   // Gemini Config states
   const [geminiKey, setGeminiKey] = useState("");
-  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash-lite");
+  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash");
   const [savingGemini, setSavingGemini] = useState(false);
 
   const fetchStatuses = async () => {
@@ -186,13 +186,25 @@ export default function IntegrationsPage() {
     toast("Saving key and testing Gemini quota models...", "info");
 
     try {
+      const getFallbackModels = (primaryModel: string): string[] => {
+        const fallbacks: Record<string, string[]> = {
+          "gemini-2.5-flash": ["gemini-2.5-flash-lite", "gemini-1.5-flash"],
+          "gemini-2.5-flash-lite": ["gemini-2.5-flash", "gemini-1.5-flash"],
+          "gemini-2.5-pro": ["gemini-2.5-flash", "gemini-1.5-pro"],
+          "gemini-2.0-flash": ["gemini-2.5-flash", "gemini-2.5-flash-lite"],
+          "gemini-1.5-pro": ["gemini-1.5-flash", "gemini-2.5-flash"],
+          "gemini-1.5-flash": ["gemini-2.5-flash-lite", "gemini-2.5-flash"],
+        };
+        return fallbacks[primaryModel] || ["gemini-2.5-flash"];
+      };
+
       const res = await fetch(`${API_URL}/api/v1/integrations/gemini/config`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           api_key: geminiKey,
           allowed_model: geminiModel,
-          fallback_models: ["gemini-2.5-flash"]
+          fallback_models: getFallbackModels(geminiModel)
         })
       });
 
@@ -488,9 +500,12 @@ export default function IntegrationsPage() {
                   onChange={e => setGeminiModel(e.target.value)}
                   className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 focus:outline-none"
                 >
-                  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Fast & light)</option>
-                  <option value="gemini-2.5-flash">gemini-2.5-flash (Standard)</option>
-                  <option value="gemini-1.5-pro">gemini-1.5-pro (Thorough)</option>
+                  <option value="gemini-2.5-flash">gemini-2.5-flash (Balanced & Fast)</option>
+                  <option value="gemini-2.5-flash-lite">gemini-2.5-flash-lite (Lightweight & Cost-efficient)</option>
+                  <option value="gemini-2.5-pro">gemini-2.5-pro (High Reasoning & Coding)</option>
+                  <option value="gemini-2.0-flash">gemini-2.0-flash (Advanced Next-Gen Speed)</option>
+                  <option value="gemini-1.5-pro">gemini-1.5-pro (Legacy Multimodal Thorough)</option>
+                  <option value="gemini-1.5-flash">gemini-1.5-flash (Legacy High-Speed)</option>
                 </select>
               </div>
 

@@ -33,10 +33,10 @@ class SheetsConfigRequest(BaseModel):
 
 class GeminiConfigRequest(BaseModel):
     api_key: str = Field(..., description="Gemini API Key")
-    allowed_model: str = Field(
-        "gemini-2.5-flash-lite", description="Allowed Gemini Model"
+    allowed_model: str = Field("gemini-2.5-flash", description="Allowed Gemini Model")
+    fallback_models: list[str] = Field(
+        default_factory=lambda: ["gemini-2.5-flash-lite"]
     )
-    fallback_models: list[str] = Field(default_factory=lambda: ["gemini-2.5-flash"])
 
 
 @router.get("/gmail/status")
