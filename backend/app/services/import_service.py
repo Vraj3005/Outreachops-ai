@@ -747,8 +747,8 @@ class ImportService:
         if not valid_records:
             return {
                 "imported": 0,
-                "skipped_duplicates": validation["error_count"],
-                "total": validation["total_rows"],
+                "failed_rows": validation["error_count"],
+                "total_processed": validation["total_rows"],
             }
 
         # 2. Save mapping preset if requested

@@ -213,6 +213,15 @@ export default function ImportWizardModal({ isOpen, onClose, onImportComplete, d
 
   // STEP 2: PREVIEW & VALIDATE MAPPINGS
   const handlePreviewMappings = async () => {
+    const mappedTargets = Object.values(mappings);
+    const hasEmail = mappedTargets.includes("contact_email");
+    const hasWebsite = mappedTargets.includes("website");
+
+    if (!hasEmail || !hasWebsite) {
+      toast("You must map both 'Contact Email' and 'Website' to proceed.", "error");
+      return;
+    }
+
     setValidating(true);
     try {
       const res = await fetch(`${API_URL}/api/v1/imports/preview`, {
