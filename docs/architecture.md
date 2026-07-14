@@ -1,67 +1,87 @@
 # OutreachOps AI — System Architecture
 
-This document describes the end-to-end data flow and architectural design of OutreachOps AI, a B2B cold email automation platform with a human-in-the-loop review workflow.
+This document describes the architectural design, core subsystems, data flow cycles, and security boundaries of OutreachOps AI.
 
-## End-to-End System Flow
+---
 
-The data moves sequentially through the system according to the following workflow:
+## 1. End-to-End System Data Flow
+
+The data flow cycle traces lead ingestion to outbound email dispatch and telemetry compilation:
 
 ```mermaid
 graph TD
-    A[Google Sheets API] -->|1. Fetch Lead Rows| B[FastAPI Backend]
-    B -->|2. Sync & Store Leads| C[(Supabase Postgres)]
-    B -->|3. Generate Personalizations| D[Gemini API]
-    D -->|4. Return E-mail Drafts| B
-    B -->|5. Store Pending Drafts| C
-    E[Next.js Frontend Dashboard] <-->|6. Fetch & Review / Edit Drafts| B
-    E -->|7. Approve Drafts YES| B
-    B -->|8. Send Emails OAuth| F[Gmail API]
-    F -->|9. Audit & Success Logs| C
-    C -->|10. Compile Metrics| G[Analytics Dashboard]
-    
-    style A fill:#34A853,stroke:#1F8A3D,stroke-width:2px,color:#fff
-    style B fill:#009485,stroke:#007C6F,stroke-width:2px,color:#fff
-    style C fill:#3ECF8E,stroke:#249764,stroke-width:2px,color:#fff
-    style D fill:#4285F4,stroke:#1A73E8,stroke-width:2px,color:#fff
-    style E fill:#4F46E5,stroke:#3730A3,stroke-width:2px,color:#fff
-    style F fill:#EA4335,stroke:#C5221F,stroke-width:2px,color:#fff
-    style G fill:#F97316,stroke:#C2410C,stroke-width:2px,color:#fff
+    A[Upload Lead File / Sync Sheets] -->|1. Parse File Data| B[FastAPI Web Process]
+    B -->|2. Store Leads & Config| C[(Database Layer: SQLite/Postgres)]
+    D[Generation Worker Daemon] -->|3. Fetch Pending Leads & Templates| C
+    D -->|4. Request Personalized Copy| E[Gemini API]
+    E -->|5. Return Structured Personalizations| D
+    D -->|6. Save Generated Email Drafts| C
+    F[Next.js Frontend Dashboard] <-->|7. Retrieve, Review & Edit Drafts| B
+    F -->|8. Approve Drafts| B
+    B -->|9. Update status to Approved| C
+    G[Durable Sending Worker Daemon] -->|10. Claim Scheduled Emails| C
+    G -->|11. Verify DNC Blocklist & Quotas| C
+    G -->|12. Dispatch Emails OAuth| H[Gmail API]
+    H -->|13. Log Send Event & Track Status| C
+    I[Reply Sync Daemon] -->|14. Crawl Inbox & Detect Responses| H
+    I -->|15. Parse Sentiment & Stop Sequences| C
 ```
 
 ---
 
-## Detailed Component Flow
+## 2. Subsystem Components
 
-### 1. Lead Ingestion (Google Sheets API)
-- **Source**: Target Google Sheet containing columns for Website URL, website issues/pain points, and ERP pitch approach (similar to columns A-E in your existing script).
-- **Service**: `GoogleSheetsService` in backend.
-- **Process**: The backend queries the Google Sheets API via a service account or user credentials, retrieves new rows, validates email fields, and checks for duplicates.
+### I. Frontend (Next.js Dashboard)
+* Built using Next.js 14 App Router, TypeScript, and Tailwind CSS.
+* **Dashboard View**: Renders charts (Recharts) detailing lead progress, delivery funnels, and response counts.
+* **Lead Manager**: Interface for universal spreadsheets upload, columns mapping wizard, and Google Sheets sync.
+* **Draft review queue**: Detailed review pane to view email quality metrics (clarity, personalization, spam risk), edit subjects/bodies, and approve drafts in bulk.
+* **Queue Observability**: Live diagnostics view of background threads, heartbeat logs, and operational worker toggles (Pause/Resume/Drain).
 
-### 2. Database Layer (Supabase Postgres)
-- **Role**: Serves as the single source of truth for leads, drafts, logs, and analytics.
-- **Benefits**: Real-time subscriptions let the Next.js frontend update dynamically when a draft status changes or when a background ingestion completes.
-- **Tables**:
-  - `leads`: Stores contact info, target website, and initial inputs.
-  - `email_drafts`: Holds AI-generated subjects, bodies, approvals (YES/NO/PENDING), and send status.
-  - `delivery_logs`: Captures message IDs, time stamps, and API error logs.
+### II. API Server (FastAPI Backend Web Process)
+* Lightweight FastAPI service executing on a Uvicorn process.
+* Exposes RESTful endpoints for CRUD operations (campaigns, settings, leads, drafts, DNC).
+* **Correlation ID Propagation**: `LoggingMiddleware` captures or assigns `X-Correlation-ID` headers to all requests, setting it in `contextvars` to group trace logs.
+* **Authentication Barrier**: Access token validation in `require_owner` verifying Supabase JWT credentials.
 
-### 3. AI Personalization Engine (Gemini API)
-- **Models**: `gemini-2.5-flash` or `gemini-2.5-flash-lite`.
-- **Logic**: Structured prompts feed website issues and ERP business angles to generate target copy variants.
-- **Fallback Strategy**: An ordered model fallback list prevents temporary 503 high-demand exceptions from stopping operations.
+### III. Database Layer (SQLite / Supabase Postgres)
+* **Demo/Development Fallback**: Uses local SQLite database (`local_outreachops.db`) if `ENV=test` to permit offline showcases.
+* **Production SQL**: Supabase Postgres with strict **Row-Level Security (RLS)** policies. All data modifications are scoped to the authenticated `user_id` context (`auth.uid() = user_id`).
 
-### 4. Human-In-The-Loop Review (Draft Queue)
-- **Frontend Dashboard**: Lists all generated drafts.
-- **Interactions**:
-  - **Edit**: Users can tweak the subject line or email body.
-  - **Regenerate**: Triggers another Gemini call with customized guidelines.
-  - **Approve**: Marks `approve_website` or `approve_erp` to `YES`.
+### IV. Generation Worker Daemon
+* Separate concurrent daemon thread (`GenerationWorker`) polling the database for pending generation tasks.
+* **Claim Mutex**: Utilizes atomic row locking or optimistic updates (status changes to `processing`) to guarantee mutual exclusion in multi-process setups.
+* **Fallback Strategy**: Retries failed calls across the configured `GEMINI_MODEL_LIST` hierarchy with jittered exponential backoffs.
 
-### 5. Email Dispatcher (Gmail API OAuth)
-- **Connection**: OAuth 2.0 Web Client authentication (Gmail User context).
-- **Process**: A background task picks up approved (`YES`) drafts and dispatches them via Gmail APIs using MIME multipart payloads.
-- **Rate-Limiting**: Inter-send delays (default: 5 seconds) prevent trigger-happy suspensions.
+### V. Sending Worker Daemon
+* Concurrent daemon thread (`DurableSendingWorker`) responsible for outbox delivery.
+* **Guardrails verification**: Before dispatch, checks Daily Cap Limits, Inter-send Spacing Delays, Same-Day double contact locks, and DNC blocklists.
+* **Dispatches**: Constructs MIMEMultipart MIME payloads and sends them via Gmail endpoints using owner credentials.
 
-### 6. Audit Logs & Analytics
-- **Telemetry**: Tracks delivery states (`SENT`, `FAILED`, `PENDING`) and records trace logs for API errors.
-- **Aggregations**: Computes metrics like conversion funnel statistics, send success rates, and prompt performance metrics for display on the front-end.
+### VI. Gmail Reply Sync Daemon
+* Background daemon thread (`GmailSyncService`) executing recurring sync ticks.
+* Crawls recent Gmail inbox threads matching the campaign recipient list.
+* Parses emails through sentiment classifier rules. If a reply is identified, transitions the lead's state to `stopped`, canceling all pending sequence steps.
+
+---
+
+## 3. Security Boundaries & Isolation
+
+```text
+       PUBLIC WEB
+           │
+           ▼
+┌──────────────────────┐  JWT Auth  ┌────────────────────────┐
+│ Next.js Frontend App │ ─────────> │ FastAPI API Gateway    │
+└──────────────────────┘            └────────────────────────┘
+                                                 │
+                             ┌───────────────────┴───────────────────┐
+                             ▼                                       ▼
+                 ┌──────────────────────┐                ┌──────────────────────┐
+                 │ Supabase Postgres    │                │ SQLite Local Database│
+                 │ (RLS Scoped Policies)│                │ (Test/Demo Mode)     │
+                 └──────────────────────┘                └──────────────────────┘
+```
+
+* **Client isolation**: The frontend app has no direct write access to database schemas. All mutations pass through RLS rules or the API controller layer.
+* **Credential Vaulting**: Tokens, SMTP certificates, and database service keys are stored inside server-side environment variables and are never sent to the client.

@@ -1,120 +1,289 @@
-import os
 import base64
-import pickle
 import logging
+import os
 import re
 from datetime import datetime
-from typing import Tuple, Dict, Any, Optional
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
+from typing import Any
 
 from fastapi import HTTPException
+from google.auth.transport.requests import Request
+from google_auth_oauthlib.flow import Flow, InstalledAppFlow
+from googleapiclient.discovery import build
+
 from app.config import settings
 from app.database import supabase
-from app.services.error_service import MissingCredentialsError, GmailAuthExpiredError, InvalidEmailError, OutreachOpsException
+from app.services.error_service import (
+    GmailAuthExpiredError,
+    InvalidEmailError,
+    MissingCredentialsError,
+    OutreachOpsException,
+)
 
 logger = logging.getLogger("outreachops.services.gmail")
+
 
 class GmailService:
     """
     Gmail OAuth Manager and Outbox Sender Service.
     """
+
     def __init__(self):
-        self.creds_path = os.getenv("GMAIL_CREDENTIALS_PATH") or settings.GMAIL_CREDENTIALS_PATH
+        self.creds_path = (
+            os.getenv("GMAIL_CREDENTIALS_PATH") or settings.GMAIL_CREDENTIALS_PATH
+        )
         self.token_path = os.getenv("GMAIL_TOKEN_PATH") or settings.GMAIL_TOKEN_PATH
         self.scopes = ["https://www.googleapis.com/auth/gmail.send"]
 
-    def check_connection_status(self) -> Dict[str, Any]:
+    def _get_db_credentials(self, user_id: str):
+        import json
+
+        from google.oauth2.credentials import Credentials
+
+        from app.utils.crypto import decrypt_val
+
+        try:
+            res = (
+                supabase.table("integration_connections")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("provider", "gmail")
+                .execute()
+            )
+            if not res.data:
+                return None
+            conn = res.data[0]
+            if conn.get("connection_status") != "connected":
+                return None
+
+            creds_str = decrypt_val(conn.get("encrypted_credentials"))
+            if not creds_str:
+                return None
+
+            creds_info = json.loads(creds_str)
+            return Credentials(
+                token=creds_info.get("token"),
+                refresh_token=creds_info.get("refresh_token"),
+                token_uri=creds_info.get(
+                    "token_uri", "https://oauth2.googleapis.com/token"
+                ),
+                client_id=creds_info.get("client_id"),
+                client_secret=creds_info.get("client_secret"),
+                scopes=self.scopes,
+            )
+        except Exception as e:
+            logger.error(f"Error loading credentials from database: {e}")
+            return None
+
+    def _save_db_credentials(self, user_id: str, creds):
+        import json
+
+        from app.utils.crypto import encrypt_val
+
+        creds_info = {
+            "token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+        }
+        encrypted = encrypt_val(json.dumps(creds_info))
+
+        payload = {
+            "user_id": user_id,
+            "provider": "gmail",
+            "connection_status": "connected",
+            "encrypted_credentials": encrypted,
+            "updated_at": datetime.utcnow().isoformat(),
+        }
+
+        res = (
+            supabase.table("integration_connections")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("provider", "gmail")
+            .execute()
+        )
+        if res.data:
+            supabase.table("integration_connections").update(payload).eq(
+                "id", res.data[0]["id"]
+            ).execute()
+        else:
+            import uuid
+
+            payload["id"] = str(uuid.uuid4())
+            supabase.table("integration_connections").insert(payload).execute()
+
+    def check_connection_status(self, user_id: str) -> dict[str, Any]:
         """
         Returns Gmail OAuth state: connected, expired, or disconnected.
         """
         if settings.DEMO_MODE:
-            return {"status": "connected", "details": "Demo mode active. Sends simulated."}
+            return {
+                "status": (
+                    "connected" if settings.DEMO_SENDING_ENABLED else "disconnected"
+                ),
+                "details": "Demo Mode active. Simulated Gmail connected status.",
+            }
 
-        if not self.creds_path or not os.path.exists(self.creds_path):
-            raise MissingCredentialsError(
-                message=f"Gmail client credentials file not found at: {self.creds_path}",
-                details={"credentials_path": self.creds_path}
-            )
+        creds = self._get_db_credentials(user_id)
+        if not creds:
+            return {
+                "status": "disconnected",
+                "details": "No OAuth tokens found. Please run authorization.",
+            }
 
-        if not os.path.exists(self.token_path):
-            return {"status": "disconnected", "details": "No OAuth tokens found. Please run authorization."}
-
-        try:
-            with open(self.token_path, "rb") as token_file:
-                creds = pickle.load(token_file)
-        except Exception as e:
-            return {"status": "disconnected", "details": f"Failed to load cached tokens: {e}"}
-
-        if creds and creds.valid:
+        if creds.valid:
             return {"status": "connected", "details": "Active session initialized."}
 
         # Token is expired
-        if creds and creds.expired and creds.refresh_token:
+        if creds.expired and creds.refresh_token:
             try:
                 logger.info("Attempting to refresh expired Gmail OAuth token...")
                 creds.refresh(Request())
-                with open(self.token_path, "wb") as token_file:
-                    pickle.dump(creds, token_file)
-                return {"status": "connected", "details": "Token refreshed successfully."}
+                self._save_db_credentials(user_id, creds)
+                return {
+                    "status": "connected",
+                    "details": "Token refreshed successfully.",
+                }
             except Exception as e:
                 logger.error(f"Failed to refresh Gmail OAuth token: {e}")
-                raise GmailAuthExpiredError(
-                    message="Gmail session expired and automatic token refresh failed.",
-                    details={"error": str(e)}
-                )
-        
-        raise GmailAuthExpiredError(message="Gmail OAuth credentials have expired.")
+                return {
+                    "status": "disconnected",
+                    "details": f"Failed to refresh cached tokens: {e}",
+                }
 
-    def run_oauth_flow(self) -> Dict[str, Any]:
+        return {
+            "status": "disconnected",
+            "details": "Gmail OAuth credentials have expired.",
+        }
+
+    def get_authorization_url(self, user_id: str, redirect_uri: str) -> tuple[str, str]:
         """
-        Starts authorization flow and caches token.pkl.
-        Ref: setup_gmail() lines 254-276 in coldmail_fixed_genai.py
+        Generates a Google OAuth authorization URL for the web production flow.
+        Returns a tuple of (authorization_url, state).
+        """
+        if not self.creds_path or not os.path.exists(self.creds_path):
+            raise MissingCredentialsError(
+                message="Missing gmail_credentials.json. Cannot run OAuth flow."
+            )
+
+        flow = Flow.from_client_secrets_file(
+            self.creds_path, scopes=self.scopes, redirect_uri=redirect_uri
+        )
+        import uuid
+
+        state_token = f"{user_id}:{uuid.uuid4().hex}"
+
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+            state=state_token,
+        )
+        return auth_url, state_token
+
+    def exchange_callback_code(
+        self, user_id: str, code: str, redirect_uri: str
+    ) -> dict[str, Any]:
+        """
+        Exchanges the authorization code from Google callback for credentials.
+        Saves credentials securely to the database.
+        """
+        if not self.creds_path or not os.path.exists(self.creds_path):
+            raise MissingCredentialsError(
+                message="Missing gmail_credentials.json. Cannot run OAuth flow."
+            )
+
+        try:
+            flow = Flow.from_client_secrets_file(
+                self.creds_path, scopes=self.scopes, redirect_uri=redirect_uri
+            )
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+
+            # Save in database
+            self._save_db_credentials(user_id, creds)
+            logger.info("Gmail OAuth authentication successful via web callback.")
+            return {
+                "status": "connected",
+                "message": "Successfully authenticated and cached token.",
+            }
+        except Exception as e:
+            logger.error(f"Gmail OAuth exchange code crashed: {e}")
+            return {"status": "failed", "error": str(e)}
+
+    def run_oauth_flow(self, user_id: str) -> dict[str, Any]:
+        """
+        Starts authorization flow and caches credentials securely in DB.
         """
         if settings.DEMO_MODE:
-            return {"status": "connected", "message": "Demo mode active. OAuth bypass success."}
+            return {
+                "status": "connected",
+                "message": "Demo mode active. OAuth bypass success.",
+            }
 
         if not self.creds_path or not os.path.exists(self.creds_path):
-            raise MissingCredentialsError(message="Missing gmail_credentials.json. Cannot run OAuth flow.")
-            
+            raise MissingCredentialsError(
+                message="Missing gmail_credentials.json. Cannot run OAuth flow."
+            )
+
         try:
-            flow = InstalledAppFlow.from_client_secrets_file(self.creds_path, self.scopes)
+            flow = InstalledAppFlow.from_client_secrets_file(
+                self.creds_path, self.scopes
+            )
             # Starts local oauth server
             creds = flow.run_local_server(port=0)
-            
-            with open(self.token_path, "wb") as token_file:
-                pickle.dump(creds, token_file)
-                
+
+            # Save in database
+            self._save_db_credentials(user_id, creds)
+
             logger.info("Gmail OAuth authentication successful.")
-            return {"status": "connected", "message": "Successfully authenticated and cached token."}
+            return {
+                "status": "connected",
+                "message": "Successfully authenticated and cached token.",
+            }
         except Exception as e:
             logger.error(f"Gmail OAuth connection flow crashed: {e}")
             return {"status": "failed", "error": str(e)}
 
-    def _get_gmail_client(self):
+    def revoke_connection(self, user_id: str) -> dict[str, Any]:
+        """
+        Revokes Gmail integration credentials by deleting database records.
+        """
+        try:
+            supabase.table("integration_connections").delete().eq(
+                "user_id", user_id
+            ).eq("provider", "gmail").execute()
+            return {"status": "success", "message": "Connection revoked successfully."}
+        except Exception as e:
+            logger.error(f"Failed to revoke Gmail connection: {e}")
+            return {"status": "failed", "error": str(e)}
+
+    def _get_gmail_client(self, user_id: str):
         """Loads and returns the built googleapiclient Gmail resource client."""
         if settings.DEMO_MODE:
             return None
 
-        status = self.check_connection_status()
+        status = self.check_connection_status(user_id)
         if status["status"] != "connected":
-            raise GmailAuthExpiredError(message="Gmail Client is offline. Authorize Gmail first.")
-            
-        with open(self.token_path, "rb") as token_file:
-            creds = pickle.load(token_file)
-            
-        return build("gmail", "v1", credentials=creds)
+            raise GmailAuthExpiredError(
+                message="Gmail Client is offline. Authorize Gmail first."
+            )
+
+        creds = self._get_db_credentials(user_id)
+        import httplib2
+
+        http_client = httplib2.Http(timeout=15.0)
+        return build("gmail", "v1", credentials=creds, http=http_client)
 
     def is_valid_email(self, email: str) -> bool:
         if not email:
             return False
         return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email.strip()))
 
-    def send_approved_email(self, draft_id: str, user_id: str) -> Dict[str, Any]:
+    def send_approved_email(self, draft_id: str, user_id: str) -> dict[str, Any]:
         """
         Validates draft approval status, checks DNC records, and dispatches email via Gmail API.
         Logs every attempt to Supabase send_logs.
@@ -124,13 +293,18 @@ class GmailService:
 
         try:
             # 1. Fetch Draft Details
-            draft_res = supabase.table("email_drafts").select("*").eq("id", draft_id).execute()
+            draft_res = (
+                supabase.table("email_drafts").select("*").eq("id", draft_id).execute()
+            )
             if not draft_res.data:
                 raise HTTPException(status_code=404, detail="Email draft not found")
             draft = draft_res.data[0]
 
             if draft.get("status") != "approved":
-                return {"status": "skipped", "reason": f"Draft status is '{draft.get('status')}', not 'approved'."}
+                return {
+                    "status": "skipped",
+                    "reason": f"Draft status is '{draft.get('status')}', not 'approved'.",
+                }
 
             lead_id = draft.get("lead_id")
             email_type = draft.get("email_type")
@@ -140,7 +314,10 @@ class GmailService:
             # 2. Fetch Lead Details
             lead_res = supabase.table("leads").select("*").eq("id", lead_id).execute()
             if not lead_res.data:
-                return {"status": "failed", "error": f"Associated lead '{lead_id}' not found."}
+                return {
+                    "status": "failed",
+                    "error": f"Associated lead '{lead_id}' not found.",
+                }
             lead = lead_res.data[0]
             recipient_email = lead.get("contact_email") or ""
 
@@ -148,54 +325,72 @@ class GmailService:
             if not self.is_valid_email(recipient_email):
                 try:
                     # Update draft and insert failed log
-                    supabase.table("email_drafts").update({
-                        "status": "failed",
-                        "last_error": "Invalid or missing recipient email"
-                    }).eq("id", draft_id).execute()
-                    
-                    supabase.table("send_logs").insert({
-                        "draft_id": draft_id,
-                        "lead_id": lead_id,
-                        "user_id": user_id,
-                        "recipient_email": recipient_email,
-                        "subject": subject,
-                        "email_type": email_type,
-                        "status": "failed",
-                        "error_message": "Invalid or missing recipient email"
-                    }).execute()
+                    supabase.table("email_drafts").update(
+                        {
+                            "status": "failed",
+                            "last_error": "Invalid or missing recipient email",
+                        }
+                    ).eq("id", draft_id).execute()
+
+                    supabase.table("send_logs").insert(
+                        {
+                            "draft_id": draft_id,
+                            "lead_id": lead_id,
+                            "user_id": user_id,
+                            "recipient_email": recipient_email,
+                            "subject": subject,
+                            "email_type": email_type,
+                            "status": "failed",
+                            "error_message": "Invalid or missing recipient email",
+                        }
+                    ).execute()
                 except Exception as db_err:
                     logger.error(f"Failed to write failure log: {db_err}")
-                
-                raise InvalidEmailError(message=f"Recipient email '{recipient_email}' is invalid.")
+
+                raise InvalidEmailError(
+                    message=f"Recipient email '{recipient_email}' is invalid."
+                )
 
             # 4. Check Do Not Contact List
-            dnc_check = supabase.table("do_not_contact").select("id") \
-                .eq("user_id", user_id) \
-                .eq("email", recipient_email) \
+            dnc_check = (
+                supabase.table("do_not_contact")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("email", recipient_email)
                 .execute()
+            )
             if dnc_check.data:
-                logger.warning(f"Prevented mailing. Lead '{recipient_email}' is on Do Not Contact (DNC) list.")
-                
+                logger.warning(
+                    f"Prevented mailing. Lead '{recipient_email}' is on Do Not Contact (DNC) list."
+                )
+
                 try:
-                    supabase.table("email_drafts").update({
-                        "status": "rejected",
-                        "last_error": "Blocked by Do Not Contact (DNC) list"
-                    }).eq("id", draft_id).execute()
-                    
-                    supabase.table("send_logs").insert({
-                        "draft_id": draft_id,
-                        "lead_id": lead_id,
-                        "user_id": user_id,
-                        "recipient_email": recipient_email,
-                        "subject": subject,
-                        "email_type": email_type,
-                        "status": "failed",
-                        "error_message": "Recipient email is blocked by Do Not Contact (DNC) list"
-                    }).execute()
+                    supabase.table("email_drafts").update(
+                        {
+                            "status": "rejected",
+                            "last_error": "Blocked by Do Not Contact (DNC) list",
+                        }
+                    ).eq("id", draft_id).execute()
+
+                    supabase.table("send_logs").insert(
+                        {
+                            "draft_id": draft_id,
+                            "lead_id": lead_id,
+                            "user_id": user_id,
+                            "recipient_email": recipient_email,
+                            "subject": subject,
+                            "email_type": email_type,
+                            "status": "failed",
+                            "error_message": "Recipient email is blocked by Do Not Contact (DNC) list",
+                        }
+                    ).execute()
                 except Exception as db_err:
                     logger.error(f"Failed to write DNC rejection log: {db_err}")
-                
-                return {"status": "blocked", "reason": "Recipient listed on Do Not Contact (DNC)"}
+
+                return {
+                    "status": "blocked",
+                    "reason": "Recipient listed on Do Not Contact (DNC)",
+                }
         except (HTTPException, OutreachOpsException):
             raise
         except Exception as e:
@@ -205,60 +400,71 @@ class GmailService:
         # 5. Connect and Send via Gmail
         try:
             if settings.DEMO_MODE:
-                gmail_message_id = f"demo_msg_{draft_id}_{int(datetime.now().timestamp())}"
-                logger.info(f"Demo Mode: Simulating email dispatch to {recipient_email}. Generated ID: {gmail_message_id}")
+                gmail_message_id = (
+                    f"demo_msg_{draft_id}_{int(datetime.now().timestamp())}"
+                )
+                logger.info(
+                    f"Demo Mode: Simulating email dispatch to {recipient_email}. Generated ID: {gmail_message_id}"
+                )
             else:
                 gmail_client = self._get_gmail_client()
-                
+
                 message = MIMEMultipart()
                 message["to"] = recipient_email
                 message["subject"] = subject
                 message.attach(MIMEText(body, "plain", "utf-8"))
                 raw_msg = base64.urlsafe_b64encode(message.as_bytes()).decode()
-                
+
                 # Dispatch
-                res = gmail_client.users().messages().send(userId="me", body={"raw": raw_msg}).execute()
+                res = (
+                    gmail_client.users()
+                    .messages()
+                    .send(userId="me", body={"raw": raw_msg})
+                    .execute()
+                )
                 gmail_message_id = res.get("id")
 
             # Update Draft State
-            supabase.table("email_drafts").update({
-                "status": "sent",
-                "sent_at": datetime.now().isoformat()
-            }).eq("id", draft_id).execute()
+            supabase.table("email_drafts").update(
+                {"status": "sent", "sent_at": datetime.now().isoformat()}
+            ).eq("id", draft_id).execute()
 
             # Insert Success Log
-            supabase.table("send_logs").insert({
-                "draft_id": draft_id,
-                "lead_id": lead_id,
-                "user_id": user_id,
-                "recipient_email": recipient_email,
-                "subject": subject,
-                "email_type": email_type,
-                "status": "sent",
-                "gmail_message_id": gmail_message_id
-            }).execute()
+            supabase.table("send_logs").insert(
+                {
+                    "draft_id": draft_id,
+                    "lead_id": lead_id,
+                    "user_id": user_id,
+                    "recipient_email": recipient_email,
+                    "subject": subject,
+                    "email_type": email_type,
+                    "status": "sent",
+                    "gmail_message_id": gmail_message_id,
+                }
+            ).execute()
 
             return {"status": "success", "gmail_message_id": gmail_message_id}
 
         except Exception as e:
             logger.error(f"Gmail transmission failed: {e}")
-            
+
             # Update Draft State to Failed
-            supabase.table("email_drafts").update({
-                "status": "failed",
-                "last_error": str(e)
-            }).eq("id", draft_id).execute()
+            supabase.table("email_drafts").update(
+                {"status": "failed", "last_error": str(e)}
+            ).eq("id", draft_id).execute()
 
             # Insert Failed Log
-            supabase.table("send_logs").insert({
-                "draft_id": draft_id,
-                "lead_id": lead_id,
-                "user_id": user_id,
-                "recipient_email": recipient_email,
-                "subject": subject,
-                "email_type": email_type,
-                "status": "failed",
-                "error_message": str(e)
-            }).execute()
+            supabase.table("send_logs").insert(
+                {
+                    "draft_id": draft_id,
+                    "lead_id": lead_id,
+                    "user_id": user_id,
+                    "recipient_email": recipient_email,
+                    "subject": subject,
+                    "email_type": email_type,
+                    "status": "failed",
+                    "error_message": str(e),
+                }
+            ).execute()
 
             return {"status": "failed", "error": str(e)}

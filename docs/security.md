@@ -1,55 +1,51 @@
-# OutreachOps AI — Security & Safety Guardrails
+# OutreachOps AI — Security & Guardrails
 
-This document outlines the safety guardrails, environment hygiene, and security design patterns built into OutreachOps AI.
-
----
-
-## 1. Secrets Management & Git Hygiene
-
-* **Credential Suppression**: All configuration settings and API keys are stored in server-side `.env` files. No credentials or OAuth JSON files are checked into version control.
-* **Gitignore Directives**: The root `.gitignore` explicitly blocks the following file patterns:
-  - `*.json` (specifically `sheets_credentials.json` and `gmail_credentials.json` at root or config directories)
-  - `*.pkl` (specifically `gmail_token.pkl` which stores access and refresh tokens)
-  - `.env` and `.env.local`
-  - `.venv/` and `__pycache__/`
+This document describes the safety engineering practices, encryption designs, network protections, and sending safeguards implemented in OutreachOps AI.
 
 ---
 
-## 2. Row Level Security (RLS) in Supabase
-
-Every table in the database is protected by PostgreSQL Row Level Security (RLS) policies.
-
-* **Owner Scoping**: Users can only read, write, update, or delete rows where the `user_id` column matches their authenticated user ID (`auth.uid()`).
-  ```sql
-  -- Example policy for leads table
-  CREATE POLICY "Leads user isolation" 
-  ON public.leads 
-  FOR ALL 
-  USING (auth.uid() = user_id) 
-  WITH CHECK (auth.uid() = user_id);
-  ```
-* **Database Client Isolation**: The Next.js client uses the Anon Key (which respects RLS policies), while the FastAPI backend service uses the Service Role Key exclusively for secure, server-side orchestration.
+## 1. Authentication & Owner-Only Access
+* **Whitelist Check**: System entry is restricted to the owner email configured under `OWNER_EMAIL`. All non-matching JWT signatures are rejected.
+* **Token Verification**: Handled server-side by the FastAPI backend validating Supabase JWT signatures. No client-supplied user IDs are trusted.
+* **Durable Authentication Rate Limiting**: Attempts are tracked by IP in the database. Ten failed attempts within a 60-second window will temporarily block the IP.
 
 ---
 
-## 3. Email Outbound Guardrails (Safety Core)
+## 2. Secrets Management & Decryption
+* **Secrets Hygiene**: API keys, credentials, and credentials keys are stored securely in `.env` files. No credentials or OAuth configurations are checked into git.
+* **Base64 Startup Decryption**: Credentials keys stored in environment variables (e.g. `GMAIL_CREDENTIALS_B64`) are automatically decoded into temporary JSON/PKL files during startup.
 
-OutreachOps AI implements strict rules to prevent automated spamming, domain reputation damage, and double-contact errors:
+---
 
-### I. Do Not Contact (DNC) Blocklist
-Before any email dispatch, the backend queries the `do_not_contact` table. If the recipient email exists in this blocklist, the draft status is marked as `rejected` and the transmission is blocked immediately.
+## 3. Data Encryption
+* Integrations metadata (e.g. Gmail OAuth tokens and spreadsheet credentials) is encrypted before being stored in the database.
+* **Fernet Symmetric Cryptography**: Encryption is handled using Fernet cryptography utilizing `ENCRYPTION_KEY`. Stored database fields cannot be read in plain-text if the database is compromised.
 
-### II. Validation Engine
-Emails must pass a validation check using regex formatting. If the contact email format is missing or invalid, the dispatch fails, the draft status updates to `failed`, and a failure log is created.
+---
 
-### III. Daily Send Throttling
-* The backend enforces a configurable `DAILY_SEND_LIMIT` (e.g., 50 sends per user).
-* Once the limit is met, all remaining approved drafts are paused, preventing accidental spikes.
+## 4. SSRF & DNS Rebinding Prevention
+To secure website crawls, the `WebsiteResearchService` enforces several guardrails:
+* **Private Network Blocking**: IP ranges (such as `127.0.0.1`, `10.0.0.0/8`, `192.168.0.0/16`, AWS/GCP metadata ports `169.254.169.254`) are blocked.
+* **Port Whitelisting**: Connections are restricted strictly to standard HTTP/HTTPS ports (`80` and `443`).
+* **DNS Rebinding Protection (Pinned DNS)**: Hostnames are verified to safe IPs before requests. During the HTTP stream, the custom `pinned_dns` context pins the socket resolution to the validated safe IP.
+* **DNS Timeout**: Explicit 5-second timeout on DNS lookup operations using threaded joins.
 
-### IV. Inter-Send Delay (Spacing)
-* To avoid being flagged as bot behavior by Google mail servers, the outbox processor waits `SEND_DELAY_SECONDS` (default: 60 seconds) between successive email sends.
-* This delay is processed asynchronously in the background.
+---
 
-### V. Same-Day Double Contact Lockout
-* A lock prevents sending both a website improvement email and an ERP pitch email to the same contact on the same calendar day.
-* If a draft has been successfully sent to a recipient, any subsequent draft to that contact is held in the queue.
+## 5. Upload Safety
+* Universal imports accept only `.csv`, `.xlsx`, and `.xls` files.
+* Content validation is executed before DB commit, filtering out corrupted binary structures or executable headers to prevent remote code executions.
+
+---
+
+## 6. Prompt Injection Mitigation
+* Prompts are compiled into templates where lead website details are sanitized and passed inside designated user parameter segments.
+* Responses are forced into structured JSON formats with strict JSON schema parsing and schema validation rules.
+
+---
+
+## 7. Outbound Sending Safeguards
+* **Do-Not-Contact (DNC) crosscheck**: Scans recipient addresses against DNC database registry before enqueueing or dispatching.
+* **Daily Caps**: Enforces strict daily caps (default: 50 emails/day) to prevent bulk spam issues.
+* **Inter-send Spacing Delays**: Adds a 60-second delay between dispatches to mimic natural human typing behaviors and protect domain health.
+* **Same-Day Double-Contact Lock**: Prevents dispatching multiple campaigns or pitch templates to the same recipient on the same day.

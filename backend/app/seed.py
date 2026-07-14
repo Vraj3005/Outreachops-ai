@@ -1,5 +1,4 @@
 import sys
-import os
 from pathlib import Path
 
 # Add backend directory to Python path
@@ -25,7 +24,7 @@ MOCK_LEADS = [
         "erp_approach": "centralized job scheduling, subcontractor invoice generation, material tracking dashboards",
         "lead_status": "Pending",
         "source_sheet_name": "Demo",
-        "source_row_number": "2"
+        "source_row_number": "2",
     },
     {
         "id": "e7c2ba31-8f43-4cb5-8e2b-2a912ef32cd1",
@@ -41,7 +40,7 @@ MOCK_LEADS = [
         "erp_approach": "job-costing ledger, purchase approval workflows, materials inventory control",
         "lead_status": "Pending",
         "source_sheet_name": "Demo",
-        "source_row_number": "3"
+        "source_row_number": "3",
     },
     {
         "id": "e7c2ba31-8f43-4cb5-8e2b-2a912ef32cd2",
@@ -57,7 +56,7 @@ MOCK_LEADS = [
         "erp_approach": "dispatching dispatch board, field service app, equipment maintenance logs, invoice syncing",
         "lead_status": "Pending",
         "source_sheet_name": "Demo",
-        "source_row_number": "4"
+        "source_row_number": "4",
     },
     {
         "id": "e7c2ba31-8f43-4cb5-8e2b-2a912ef32cd3",
@@ -73,7 +72,7 @@ MOCK_LEADS = [
         "erp_approach": "estimate approvals portal, job status notification trigger pipeline, automated dispatching",
         "lead_status": "Pending",
         "source_sheet_name": "Demo",
-        "source_row_number": "5"
+        "source_row_number": "5",
     },
     {
         "id": "e7c2ba31-8f43-4cb5-8e2b-2a912ef32cd4",
@@ -89,31 +88,38 @@ MOCK_LEADS = [
         "erp_approach": "subcontractor tracking, request for information (RFI) logs, real-time job-cost dashboard",
         "lead_status": "Pending",
         "source_sheet_name": "Demo",
-        "source_row_number": "6"
-    }
+        "source_row_number": "6",
+    },
 ]
+
 
 def seed():
     if not supabase:
-        print("[ERROR] Supabase client is not initialized. Check your environment variables.")
+        print(
+            "[ERROR] Supabase client is not initialized. Check your environment variables."
+        )
         return
 
     try:
         print(f"Checking for demo user {DEMO_EMAIL}...")
-        supabase.table("users").upsert({
-            "id": DEMO_USER_ID,
-            "email": DEMO_EMAIL,
-            "full_name": "Demo Administrator"
-        }, on_conflict="email").execute()
+        supabase.table("users").upsert(
+            {
+                "id": DEMO_USER_ID,
+                "email": DEMO_EMAIL,
+                "full_name": "Demo Administrator",
+            },
+            on_conflict="email",
+        ).execute()
         print("[SUCCESS] User configuration active.")
 
         print("Seeding leads database...")
         for lead in MOCK_LEADS:
             supabase.table("leads").upsert(lead).execute()
         print("[SUCCESS] 5 Mock leads seeded successfully.")
-        
+
     except Exception as e:
         print(f"[ERROR] Database seeding failed: {e}")
+
 
 if __name__ == "__main__":
     seed()

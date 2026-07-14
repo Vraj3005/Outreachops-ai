@@ -23,6 +23,11 @@ interface Draft {
   lead_company?: string;
   lead_website?: string;
   lead_email?: string;
+  campaign_name?: string;
+  prompt_version?: string;
+  campaign_id?: string | null;
+  variant_id?: string | null;
+  variant_name?: string | null;
 }
 
 interface Lead {
@@ -71,19 +76,32 @@ export default function DraftsPage() {
         });
       }
 
-      // 2. Fetch drafts filtered by active type
-      const draftsRes = await fetch(`${API_URL}/api/v1/drafts?email_type=${activeType}`);
+      // 2. Fetch campaigns list to map campaign names
+      const campRes = await fetch(`${API_URL}/api/v1/campaigns`);
+      let campaignsMap: Record<string, any> = {};
+      if (campRes.ok) {
+        const campData = await campRes.json();
+        campData.forEach((c: any) => {
+          campaignsMap[c.id] = c;
+        });
+      }
+
+      // 3. Fetch all drafts
+      const draftsRes = await fetch(`${API_URL}/api/v1/drafts`);
       if (draftsRes.ok) {
-        const draftsData: Draft[] = await draftsRes.json();
+        const draftsData: any[] = await draftsRes.json();
         
         // Map lead details into draft objects
         const resolved = draftsData.map(d => {
           const lead = leadsMap[d.lead_id];
+          const campaign = d.campaign_id ? campaignsMap[d.campaign_id] : null;
           return {
             ...d,
             lead_company: lead ? (lead.company_name || lead.website.split(".")[0].toUpperCase()) : "Prospect",
             lead_website: lead ? lead.website : "unknown-mock.com",
-            lead_email: lead ? (lead.contact_email || "") : ""
+            lead_email: lead ? (lead.contact_email || "") : "",
+            campaign_name: campaign ? campaign.name : "Default Campaign",
+            prompt_version: d.prompt_version || "default"
           };
         });
         setDrafts(resolved);
@@ -97,7 +115,7 @@ export default function DraftsPage() {
     } finally {
       setLoading(false);
     }
-  }, [activeType, toast]);
+  }, [toast]);
 
   useEffect(() => {
     fetchDraftsAndLeads();
@@ -508,6 +526,23 @@ export default function DraftsPage() {
                       </div>
                       <div className="text-[10px] text-zinc-500 mt-1 font-medium flex items-center gap-1">
                         <Mail className="w-3 h-3 text-zinc-400" /> {draft.lead_email || "No email available"}
+                      </div>
+                      
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        <span className="bg-zinc-150 border border-zinc-200 text-zinc-600 px-2 py-0.5 rounded text-[9px] font-bold font-mono">
+                          Campaign: {draft.campaign_name}
+                        </span>
+                        <span className="bg-zinc-150 border border-zinc-200 text-zinc-600 px-2 py-0.5 rounded text-[9px] font-bold font-mono">
+                          Version: {draft.prompt_version}
+                        </span>
+                        <span className="bg-zinc-150 border border-zinc-200 text-zinc-600 px-2 py-0.5 rounded text-[9px] font-bold font-mono">
+                          Model: {draft.ai_model || "gemini-1.5-flash"}
+                        </span>
+                        {draft.lead_website && (
+                          <span className="bg-indigo-50 border border-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[9px] font-bold font-mono">
+                            Source: {draft.lead_website}
+                          </span>
+                        )}
                       </div>
                     </div>
 

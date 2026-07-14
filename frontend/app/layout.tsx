@@ -1,6 +1,7 @@
 import "./globals.css";
 import React from "react";
 import { ToastProvider } from "@/components/Toast";
+import FetchInterceptor from "@/components/FetchInterceptor";
 
 export const metadata = {
   title: "OutreachOps AI — AI-Powered B2B Outreach SaaS",
@@ -16,6 +17,7 @@ export default function RootLayout({
     <html lang="en" className="light">
       <body className="antialiased selection:bg-indigo-100 selection:text-indigo-900">
         <ToastProvider>
+          <FetchInterceptor />
           {children}
         </ToastProvider>
       </body>

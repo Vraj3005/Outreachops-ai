@@ -1,207 +1,183 @@
-# OutreachOps AI — Database Schema
+# OutreachOps AI — Database Schema & Migration Guide
 
-This document details the PostgreSQL database tables and relationships utilized by OutreachOps AI via Supabase.
+This document details the PostgreSQL/SQLite database tables, relationships, indexes, Row-Level Security (RLS) configurations, and schema migration guides.
 
 ---
 
-## Entity-Relationship Diagram
+## 1. Entity-Relationship Diagram
 
 ```mermaid
 erDiagram
     users ||--o{ leads : "owns"
     users ||--o{ campaigns : "runs"
     users ||--o{ email_drafts : "creates"
-    users ||--o{ send_logs : "tracks"
+    users ||--o{ send_events : "tracks"
     users ||--o{ do_not_contact : "manages"
     users ||--o{ prompt_templates : "saves"
-
-    leads ||--o{ email_drafts : "has"
-    leads ||--o{ send_logs : "triggers"
-    email_drafts ||--o{ send_logs : "logs"
-
-    users {
-        uuid id PK
-        varchar email UNIQUE
-        varchar full_name
-        timestamp created_at
-    }
-
-    leads {
-        uuid id PK
-        uuid user_id FK
-        varchar company_name
-        varchar website
-        varchar industry
-        varchar country
-        varchar city
-        varchar contact_email
-        varchar phone
-        text website_pain_points
-        text erp_approach
-        varchar lead_status
-        varchar source_sheet_name
-        varchar source_row_number
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    email_drafts {
-        uuid id PK
-        uuid lead_id FK
-        uuid user_id FK
-        varchar email_type
-        varchar subject
-        text body
-        varchar status
-        varchar ai_model
-        varchar prompt_version
-        integer quality_score
-        integer spam_risk_score
-        integer personalization_score
-        integer clarity_score
-        text last_error
-        timestamp generated_at
-        timestamp approved_at
-        timestamp sent_at
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    campaigns {
-        uuid id PK
-        uuid user_id FK
-        varchar name
-        varchar campaign_type
-        varchar status
-        integer daily_send_limit
-        integer delay_seconds
-        timestamp created_at
-        timestamp updated_at
-    }
-
-    send_logs {
-        uuid id PK
-        uuid draft_id FK
-        uuid lead_id FK
-        uuid user_id FK
-        varchar recipient_email
-        varchar subject
-        varchar email_type
-        varchar status
-        text error_message
-        varchar gmail_message_id
-        timestamp sent_at
-    }
-
-    do_not_contact {
-        uuid id PK
-        uuid user_id FK
-        varchar email
-        varchar reason
-        timestamp created_at
-    }
-
-    prompt_templates {
-        uuid id PK
-        uuid user_id FK
-        varchar email_type
-        varchar tone
-        varchar length
-        varchar cta_style
-        text system_instruction
-        text user_prompt
-        varchar version
-        boolean is_active
-        timestamp created_at
-        timestamp updated_at
-    }
+    users ||--o{ owner_settings : "configures"
+    users ||--o{ import_sources : "uploads"
+    
+    campaigns ||--o{ campaign_leads : "enrolls"
+    leads ||--o{ campaign_leads : "receives"
+    
+    campaigns ||--o{ scheduled_emails : "schedules"
+    leads ||--o{ scheduled_emails : "receives"
+    
+    generation_jobs ||--o{ generation_job_items : "contains"
+    leads ||--o{ generation_job_items : "processes"
 ```
 
 ---
 
-## Tables Definition
+## 2. Table Definitions (OutreachOps AI v2)
 
-### 1. `users`
-Tracks registered SaaS users. Synchronized with Supabase Authentication profiles.
-* `id` (UUID, Primary Key)
-* `email` (VARCHAR, Unique, Not Null)
-* `full_name` (VARCHAR)
-* `created_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
+### I. `owner_settings`
+Tracks solo agency configuration and operational daemon controls.
+* `id` (TEXT, Primary Key)
+* `owner_id` (TEXT, Unique, referencing `users.id`)
+* `business_name` (TEXT)
+* `website` (TEXT)
+* `sender_name` (TEXT)
+* `sender_email` (TEXT)
+* `timezone` (TEXT, Default `'UTC'`)
+* `daily_send_limit` (INTEGER, Default `50`)
+* `minimum_send_spacing_seconds` (INTEGER, Default `60`)
+* `allowed_send_start` (TEXT, Default `'09:00'`)
+* `allowed_send_end` (TEXT, Default `'17:00'`)
+* `banned_phrases` (TEXT, JSON array, Default `'[]'`)
+* `generation_worker_paused` (INTEGER, Default `0`)
+* `sending_worker_paused` (INTEGER, Default `0`)
+* `queue_drain_enabled` (INTEGER, Default `0`)
 
-### 2. `leads`
-Stores cold leads imported from Google Sheets.
-* `id` (UUID, Primary Key, Default `gen_random_uuid()`)
-* `user_id` (UUID, Foreign Key referencing `users.id`, Cascade on Delete)
-* `company_name` (VARCHAR, Not Null)
-* `website` (VARCHAR, Not Null)
-* `industry` (VARCHAR)
-* `country` (VARCHAR)
-* `city` (VARCHAR)
-* `contact_email` (VARCHAR, Not Null)
-* `phone` (VARCHAR)
-* `website_pain_points` (TEXT)
-* `erp_approach` (TEXT)
-* `lead_status` (VARCHAR, Default `'Pending'`)
-* `source_sheet_name` (VARCHAR)
-* `source_row_number` (VARCHAR)
-* `created_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
-* `updated_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
-
-### 3. `email_drafts`
-AI personalized email pitches for review.
-* `id` (UUID, Primary Key)
-* `lead_id` (UUID, Foreign Key referencing `leads.id`, Cascade on Delete)
-* `user_id` (UUID, Foreign Key referencing `users.id`)
-* `email_type` (VARCHAR) - Can be `'website'`, `'erp'`, or `'follow_up'`
-* `subject` (VARCHAR)
-* `body` (TEXT)
-* `status` (VARCHAR, Default `'draft'`) - Can be `'draft'`, `'approved'`, `'sent'`, `'failed'`, or `'rejected'`
-* `ai_model` (VARCHAR) - Model identifier (e.g. `gemini-2.5-flash-lite`)
-* `prompt_version` (VARCHAR)
-* `quality_score` (INTEGER)
-* `spam_risk_score` (INTEGER)
-* `personalization_score` (INTEGER)
-* `clarity_score` (INTEGER)
+### II. `scheduled_emails`
+Outbox queue tracking scheduled campaign messages.
+* `id` (TEXT, Primary Key)
+* `user_id` (TEXT, referencing `users.id`)
+* `campaign_id` (TEXT, referencing `campaigns.id`)
+* `lead_id` (TEXT, referencing `leads.id`)
+* `draft_id` (TEXT, referencing `email_drafts.id`)
+* `scheduled_for` (TEXT, timestamp)
+* `status` (TEXT) - `pending`, `processing`, `sent`, `failed`, `retry`, `cancelled`
+* `attempts` (INTEGER, Default `0`)
 * `last_error` (TEXT)
-* `generated_at` (TIMESTAMP, Default `now()`)
-* `approved_at` (TIMESTAMP)
-* `sent_at` (TIMESTAMP)
-* `created_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
-* `updated_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
 
-### 4. `send_logs`
-Audit trails of dispatch actions.
-* `id` (UUID, Primary Key)
-* `draft_id` (UUID, Foreign Key referencing `email_drafts.id`, Nullable)
-* `lead_id` (UUID, Foreign Key referencing `leads.id`)
-* `user_id` (UUID, Foreign Key referencing `users.id`)
-* `recipient_email` (VARCHAR, Not Null)
-* `subject` (VARCHAR)
-* `email_type` (VARCHAR)
-* `status` (VARCHAR) - Can be `'sent'` or `'failed'`
-* `error_message` (TEXT, Nullable)
-* `gmail_message_id` (VARCHAR, Nullable)
-* `sent_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
+### III. `generation_jobs`
+Executes asynchronous batch generation jobs.
+* `id` (TEXT, Primary Key)
+* `user_id` (TEXT)
+* `campaign_id` (TEXT)
+* `status` (TEXT) - `pending`, `running`, `completed`, `failed`
+* `total` (INTEGER, Default `0`)
+* `queued` (INTEGER, Default `0`)
+* `processing` (INTEGER, Default `0`)
+* `completed` (INTEGER, Default `0`)
+* `failed` (INTEGER, Default `0`)
 
-### 5. `do_not_contact` (DNC)
-Restricted recipient registry. Preventative safety lock.
-* `id` (UUID, Primary Key)
-* `user_id` (UUID, Foreign Key referencing `users.id`)
-* `email` (VARCHAR, Not Null)
-* `reason` (VARCHAR)
-* `created_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
+### IV. `generation_job_items`
+Tasks representing an individual lead draft generation request.
+* `id` (TEXT, Primary Key)
+* `job_id` (TEXT, referencing `generation_jobs.id`)
+* `lead_id` (TEXT, referencing `leads.id`)
+* `status` (TEXT) - `pending`, `processing`, `completed`, `failed`
+* `last_error` (TEXT)
 
-### 6. `prompt_templates`
-Custom prompt instructions saved within Prompt Studio.
-* `id` (UUID, Primary Key)
-* `user_id` (UUID, Foreign Key referencing `users.id`)
-* `email_type` (VARCHAR)
-* `tone` (VARCHAR)
-* `length` (VARCHAR)
-* `cta_style` (VARCHAR)
-* `system_instruction` (TEXT)
-* `user_prompt` (TEXT)
-* `version` (VARCHAR)
-* `is_active` (BOOLEAN, Default `false`)
-* `created_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
-* `updated_at` (TIMESTAMP WITH TIME ZONE, Default `now()`)
+### V. `import_sources`
+Tracks spreadsheets uploaded for mapping.
+* `id` (TEXT, Primary Key)
+* `user_id` (TEXT)
+* `filename` (TEXT)
+* `row_count` (INTEGER)
+
+### VI. `import_mappings`
+Stores custom mappings for spreadsheet columns.
+* `id` (TEXT, Primary Key)
+* `user_id` (TEXT)
+* `mapping_json` (TEXT, JSON dictionary mapping headers to lead attributes)
+
+### VII. `import_cache`
+Stores temporary cached data rows and columns to enable stateless multi-instance uploads.
+* `fingerprint` (TEXT, Primary Key)
+* `headers` (TEXT, JSON serialized headers list)
+* `rows` (TEXT, JSON serialized rows data)
+* `validation_logs` (TEXT, JSON serialized mapping error previews)
+* `created_at` (TEXT, timestamp)
+
+---
+
+## 3. Database Indexing
+
+The following indexes are configured to ensure rapid pagination and query lookups:
+1. `idx_leads_user_status`: Composite index on `(user_id, lead_status)` in the `leads` table.
+2. `idx_drafts_user_status`: Composite index on `(user_id, status)` in the `email_drafts` table.
+3. `idx_scheduled_emails_status`: Composite index on `(status, scheduled_for)` in `scheduled_emails`.
+4. `idx_send_events_campaign_lead`: Composite index on `(campaign_id, lead_id)` in `send_events`.
+
+---
+
+## 4. Migration Guide (From V1 to V2)
+
+To upgrade your existing v1 database to support the new features, run the migration script:
+
+```sql
+-- 1. Create owner_settings table
+CREATE TABLE IF NOT EXISTS owner_settings (
+    id TEXT PRIMARY KEY,
+    owner_id TEXT UNIQUE NOT NULL,
+    business_name TEXT,
+    website TEXT,
+    sender_name TEXT,
+    sender_email TEXT,
+    sender_phone TEXT,
+    default_signature TEXT,
+    brand_voice TEXT,
+    default_tone TEXT,
+    default_cta TEXT,
+    default_language TEXT DEFAULT 'en',
+    timezone TEXT DEFAULT 'UTC',
+    daily_send_limit INTEGER DEFAULT 50,
+    minimum_send_spacing_seconds INTEGER DEFAULT 60,
+    allowed_send_start TEXT DEFAULT '09:00',
+    allowed_send_end TEXT DEFAULT '17:00',
+    required_footer TEXT,
+    banned_phrases TEXT DEFAULT '[]',
+    generation_worker_paused INTEGER DEFAULT 0,
+    sending_worker_paused INTEGER DEFAULT 0,
+    queue_drain_enabled INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 2. Create scheduled_emails table
+CREATE TABLE IF NOT EXISTS scheduled_emails (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    lead_id TEXT NOT NULL,
+    draft_id TEXT,
+    scheduled_for TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    attempts INTEGER DEFAULT 0,
+    last_error TEXT,
+    gmail_message_id TEXT,
+    gmail_thread_id TEXT,
+    sequence_step_id TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 3. Create indices for performance optimization
+CREATE INDEX IF NOT EXISTS idx_scheduled_emails_lookup 
+ON scheduled_emails (status, scheduled_for);
+
+CREATE INDEX IF NOT EXISTS idx_leads_user_status_v2
+ON leads (user_id, lead_status);
+
+-- 4. Create import_cache table for stateless multi-instance uploads
+CREATE TABLE IF NOT EXISTS import_cache (
+    fingerprint TEXT PRIMARY KEY,
+    headers TEXT NOT NULL,
+    rows TEXT NOT NULL,
+    validation_logs TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+```

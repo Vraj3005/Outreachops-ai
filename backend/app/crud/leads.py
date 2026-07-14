@@ -1,22 +1,32 @@
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any
+
 from app.database import supabase
 from app.schemas.lead import LeadCreate, LeadUpdate
 
 logger = logging.getLogger("outreachops.crud.leads")
 
-def get_leads(user_id: str, limit: int = 100) -> List[Dict[str, Any]]:
+
+def get_leads(user_id: str, limit: int = 100) -> list[dict[str, Any]]:
     if not supabase:
         logger.warning("Supabase client is not initialized")
         return []
     try:
-        res = supabase.table("leads").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+        res = (
+            supabase.table("leads")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
         return res.data
     except Exception as e:
         logger.error(f"Error fetching leads: {e}")
         return []
 
-def get_lead(lead_id: str) -> Optional[Dict[str, Any]]:
+
+def get_lead(lead_id: str) -> dict[str, Any] | None:
     if not supabase:
         return None
     try:
@@ -26,7 +36,8 @@ def get_lead(lead_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"Error fetching lead {lead_id}: {e}")
         return None
 
-def create_lead(lead_in: LeadCreate) -> Optional[Dict[str, Any]]:
+
+def create_lead(lead_in: LeadCreate) -> dict[str, Any] | None:
     if not supabase:
         return None
     try:
@@ -37,7 +48,8 @@ def create_lead(lead_in: LeadCreate) -> Optional[Dict[str, Any]]:
         logger.error(f"Error creating lead: {e}")
         return None
 
-def update_lead(lead_id: str, lead_in: LeadUpdate) -> Optional[Dict[str, Any]]:
+
+def update_lead(lead_id: str, lead_in: LeadUpdate) -> dict[str, Any] | None:
     if not supabase:
         return None
     try:
@@ -47,6 +59,7 @@ def update_lead(lead_id: str, lead_in: LeadUpdate) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error updating lead {lead_id}: {e}")
         return None
+
 
 def delete_lead(lead_id: str) -> bool:
     if not supabase:

@@ -1,79 +1,111 @@
-# OutreachOps AI 🚀
+# OutreachOps AI v2 🚀
 
-OutreachOps AI is a premium, enterprise-ready, human-in-the-loop cold outreach personalization and email marketing SaaS. It bridges the gap between cold outreach efficiency and personalization quality, allowing businesses to automatically import lead files from Google Sheets, generate laser-focused website audit and ERP pitches using the Gemini API, audit draft quality, and securely send approved emails via Gmail API OAuth.
+OutreachOps AI v2 is a specialized, human-in-the-loop cold outreach personalization and email marketing platform designed for single-owner agencies, consultants, and B2B services. It automates lead research and personalized copy generation using the Gemini API, while holding all drafts in a high-fidelity visual queue for approval and editing, enforcing strict safety checks before Gmail dispatch.
 
 ---
 
 ## 💡 The Problem & Solution
 
 * **The Problem**: Automated cold email campaigns often rely on generic templates, leading to high spam rates, low response rates, and burned domain reputations. Conversely, hand-crafted personalized emails are highly effective but impossible to scale.
-* **The Solution**: OutreachOps AI implements a **Human-in-the-Loop (HITL)** system. It automates the data ingestion and custom copywriting using generative models but holds drafts in a high-fidelity visual queue for approval and editing, enforcing strict compliance checks (such as Do-Not-Contact lists, daily caps, and inter-send delays) before dispatches.
+* **The Solution**: OutreachOps AI implements a **Human-in-the-Loop (HITL)** system. It automates the data ingestion and custom copywriting using generative models but holds drafts in a review queue for approval and editing, enforcing strict compliance checks (such as Do-Not-Contact lists, daily caps, and inter-send delays) before dispatches.
 
 ---
 
-## 🛠️ Tech Stack & Key Technologies
+## 🛠️ Core Capabilities
+
+### 1. Single-Owner Design
+* Designed specifically for solo agencies, consultants, or single-operator teams.
+* Scoped multi-tenant data structures, where all database entries are strictly separated and secured.
+* Simple, robust credential management designed for easy local setup or solo production hosting without team/collaborator bloat.
+
+### 2. Universal Imports & Column Mapping
+* Supports uploading and importing arbitrary `.csv`, `.xlsx`, or `.xls` spreadsheets.
+* **Column Mapping Engine**: Dynamically matches source headers to target contact fields (e.g. Email, Company Name, First Name, Industry) with real-time import preview and validation.
+* Remembers previous mappings to save time on subsequent imports.
+
+### 3. Generic & Custom Campaigns
+* Supports generic campaign types where templates and rules are configured around custom target audiences, tone of voice, offers, and call-to-actions (CTAs).
+* No longer locked to rigid pre-configured ERP pitches; fully flexible for any outreach objective.
+
+### 4. Multi-Step Sequences
+* Define sequential multi-step templates (Step 1, Step 2, Follow-up) with custom delay amounts (in hours or days).
+* Automatic state transitions move leads from "enrolled" to "scheduled", "sent", and eventually "completed".
+
+### 5. Website Research Snapping
+* **Website Research Service**: SSRF-safe scraper crawls homepages and subpages safely to extract visible textual content.
+* Bypasses blocks gracefully by reading and respecting target `robots.txt` guidelines.
+* Leverages Gemini to build structured company summaries, personalization facts, and relevance analysis.
+
+### 6. AI Personalization & Prompt Versions
+* Formulates hyper-targeted copy based on lead research details.
+* **Prompt Studio**: Version-controlled prompt templates with active drafts simulation. Warnings are triggered automatically in the UI if expected template variables are missing.
+* ResilientOrdered model fallback list automatically shifts down the hierarchy (e.g., trying Gemini 2.5 Flash, then falling back to Lite versions) if temporary API rate limits or quota boundaries are encountered.
+
+### 7. Human Review & Approval Loop
+* All generated draft items land in a dedicated **Draft Queue**.
+* Edit subject lines or email bodies, view model scoring (clarity, personalization, spam risk), or trigger a manual regeneration.
+* Approve items individually or in bulk to queue them for scheduling.
+
+### 8. Gmail Delivery Safety & Safeguards
+* **DNC Registry**: Cross-checks recipient addresses against a Do-Not-Contact (DNC) blocklist before dispatch.
+* **Daily Caps**: Enforces strict daily caps (e.g. 50 sends/day) and inter-send spacing delays (e.g. 60 seconds) to mimic natural human typing behaviors and protect domain reputation.
+* **Same-Day Double-Contact Lock**: Prevents sending multiple cold emails to the same recipient on the same day.
+
+### 9. Reply Sync & Stop Sequences
+* Background synchronization process crawls Gmail inbox threads securely.
+* Automatically analyzes incoming emails using rule-based classification models.
+* Categorizes sentiment and automatically transitions the campaign lead to "stopped" if a reply is detected, preventing embarrassing template follow-ups after a prospect responds.
+
+### 10. Dashboard & Analytics
+* Telemetry metrics covering lead funnel statistics, send success rates, reply counts, and campaign conversion rates.
+* Real-time engine observability diagnostics monitoring daemon heartbeats, database ping rates, and queue depths.
+
+---
+
+## 🏗️ Technology Stack
 
 * **Frontend**: Next.js 14 (App Router), TypeScript, Tailwind CSS, shadcn/ui, Lucide Icons, Recharts.
-* **Backend**: FastAPI (Python 3.11), Pydantic Settings, Uvicorn.
-* **Database & Auth**: Supabase Postgres with Row Level Security (RLS) policies, Supabase Auth.
-* **AI Orchestration**: Gemini API (`google-genai`), ordered model fallback sequences.
-* **API Integrations**: Google Sheets API (`gspread`), Gmail API OAuth 2.0.
-* **Deployment**: Docker, Vercel (Frontend), Render (Backend).
+* **Backend**: FastAPI (Python 3.11/3.14), SQLite / Supabase Postgres.
+* **Orchestration**: Gemini API (`google-genai`), Google Sheets API (`gspread`), Gmail API OAuth 2.0.
 
 ---
 
-## 📈 Senior Full-Stack Engineer Resume Bullets
-
-If you are showcasing this project on your resume, here are three high-impact, recruiter-ready bullets:
-1. **Architected and built a high-throughput, human-in-the-loop cold email automation SaaS (OutreachOps AI)** utilizing a monorepo structure with Next.js 14, FastAPI, and Supabase Postgres, enabling real-time lead ingestion, draft approval workflows, and interactive telemetry-driven dashboards.
-2. **Implemented a highly resilient personalization engine using the Gemini API** featuring custom prompt guidelines, structured validation card logic, and an automated ordered model fallback system with exponential backoff, reducing API rate limit failures by over 95% during peak traffic.
-3. **Engineered strict outbound compliance and safety guardrails**—including a Do-Not-Contact (DNC) blocklist, daily sending caps, inter-send spacing delays, and double-contact lockouts—integrated via Google Sheets and Gmail API OAuth to preserve domain reputation and sender score.
-
----
-
-## 📂 Monorepo Layout
+## 📂 System Layout
 
 ```text
 outreachops-ai/
-├── docs/                 # Detailed system manuals & diagrams
+├── docs/                 # System guides and references
 │   ├── architecture.md   # System flow and data cycle design
 │   ├── api.md            # REST API reference and payloads
 │   ├── database-schema.md# Tables, columns, and ER schema
 │   ├── security.md       # Safety systems & RLS configurations
-│   └── demo-script.md    # Guide to running the credential-free showcase
+│   ├── user-guide.md     # Full step-by-step onboarding walkthrough
+│   └── deployment.md     # Hosting config (Vercel, Render, Supabase)
 ├── backend/              # FastAPI Python backend application
 │   ├── app/              # Source code directory
-│   │   ├── services/     # Sheets, Gmail, Gemini API integrations
-│   │   ├── routes/       # API endpoints (leads, drafts, logs, telemetry)
-│   │   └── config.py     # Pydantic Settings initialization
-│   ├── Dockerfile        # Production multi-stage Docker build
-│   └── requirements.txt  # Python package list
+│   │   ├── services/     # Sheets, Gmail, Gemini, research modules
+│   │   ├── routes/       # API endpoints (leads, drafts, settings, health)
+│   │   └── utils/        # Logging, crypt, and middleware utilities
+│   ├── Dockerfile        # Production Docker build
+│   └── requirements.txt  # Python dependencies
 ├── frontend/             # Next.js TypeScript frontend dashboard
-│   ├── app/              # App router layouts and pages
-│   │   ├── dashboard/    # KPI metrics and chart displays
-│   │   ├── leads/        # Lead data table and Sheets sync
-│   │   └── drafts/       # Review queue, editor, and quality analysis
-│   └── package.json      # Node script and dependencies list
-└── docker-compose.yml    # Development environment manager
+│   ├── app/              # Page layouts and routes
+│   └── components/       # Shared UI views and Toast notifications
+└── run_ci_checks.ps1     # Automated local pipeline validation script
 ```
 
 ---
 
-## 🚀 Quick Start Setup (Local Development)
+## 🚀 Local Development Quickstart
 
-### Step 1: Database Setup
-1. Create a free project at [Supabase](https://supabase.com).
-2. Create the tables (`users`, `leads`, `email_drafts`, `send_logs`, `do_not_contact`, `prompt_templates`) using the schema definitions in [database-schema.md](file:///docs/database-schema.md).
-3. Ensure RLS is enabled for user-level data isolation.
-
-### Step 2: Backend Setup
+### 1. Backend Setup
 1. Navigate to the backend directory and create a virtual environment:
    ```bash
    cd backend
    python -m venv .venv
-   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+   source .venv/bin/activate  # Windows: .venv\Scripts\activate
    ```
-2. Install the requirements:
+2. Install requirements:
    ```bash
    pip install -r requirements.txt
    ```
@@ -81,67 +113,35 @@ outreachops-ai/
    ```bash
    cp .env.example .env     
    ```
-4. Set up your `.env` file with Supabase URL, keys, and toggle `DEMO_MODE=true` to run without API tokens.
+4. Update `.env` variables (e.g. set `DEMO_MODE=true` to test locally without remote API tokens).
 5. Launch the FastAPI server:
    ```bash
-   uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+   uvicorn app.main:app --port 8000 --reload
    ```
 
-### Step 3: Frontend Setup
+### 2. Frontend Setup
 1. Navigate to the frontend directory:
    ```bash
    cd ../frontend
-   ```
-2. Install npm packages:
-   ```bash
    npm install
    ```
-3. Copy environment configuration:
+2. Copy environment configuration:
    ```bash
    cp .env.example .env.local
    ```
-4. Configure `.env.local` to point to Supabase and your local backend (`http://localhost:8000`).
-5. Launch the Next.js server:
+3. Run the development server:
    ```bash
    npm run dev
    ```
-6. Open your browser to `http://localhost:3000`.
+4. Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-## 🧪 Experience Demo Mode (No API Setup Required)
+## 🧪 Experience Demo Mode
 
-OutreachOps AI includes a **credential-free Demo Mode** that allows reviewers or recruiters to test the application instantly:
-1. Ensure `DEMO_MODE=true` is set in the backend `.env` file.
-2. Launch the frontend and head to the **Leads** section.
-3. Click **Import from Google Sheet**. The backend automatically ingests 5 realistic leads with preconfigured website and operational issues.
-4. Select the leads, click **Generate Drafts**, and watch the AI copywriting engine generate audits and pitches. (If no Gemini key is provided, the backend falls back to realistic static mock copy).
-5. Go to the **Drafts** queue, analyze the quality metrics, edit the pitches, click **Approve**, and click **Send**.
-6. Back on the **Dashboard**, view real-time metric updates, sending status charts, and activity audit logs.
-
-For a detailed walkthrough, follow the [Demo Script Guide](file:///docs/demo-script.md).
-
----
-
-## 🌐 Production Deployment Guide
-
-### Backend (Render Deployment)
-1. Log in to [Render](https://render.com) and click **New > Web Service**.
-2. Connect your Git repository.
-3. Set the **Build Filter** or **Root Directory** to `backend`.
-4. Choose **Docker** as the Environment. Render will detect the `backend/Dockerfile` automatically.
-5. In **Advanced Settings**, configure your environment variables:
-   - `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`
-   - `GEMINI_API_KEY`, `GEMINI_MODEL_LIST`
-   - `DEMO_MODE=true` (to keep the live demo credential-free)
-6. Render will build and deploy the container.
-
-### Frontend (Vercel Deployment)
-1. Log in to [Vercel](https://vercel.com) and click **Add New > Project**.
-2. Connect your Git repository.
-3. Set the **Root Directory** to `frontend`.
-4. Configure the environment variables:
-   - `NEXT_PUBLIC_SUPABASE_URL`
-   - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
-   - `NEXT_PUBLIC_API_BASE_URL` (pointing to your deployed Render URL, e.g., `https://outreachops-api.onrender.com`)
-5. Click **Deploy**. Vercel will build your Next.js application.
+OutreachOps AI includes a **credential-free Demo Mode** that allows reviewers to test the application instantly:
+1. Set `DEMO_MODE=true` and `ENV=test` in the backend `.env` file (forces local SQLite mode).
+2. Launch the backend and frontend.
+3. Go to the **Leads** section in the UI and click **Import from Google Sheet** or upload a file. Real-looking mock leads will be generated.
+4. Select leads, click **Generate Drafts**, and watch the visual queue populate with realistic copy (clearly labeled as `[DEMO MOCK]`).
+5. Go to the **Queue** page to see the active Heartbeats, Database links, and toggle pause/resume states.
