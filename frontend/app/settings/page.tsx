@@ -219,8 +219,7 @@ export default function SettingsPage() {
                   type="email" 
                   value={settings.sender_email}
                   onChange={e => handleFieldChange("sender_email", e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg bg-zinc-50 border border-zinc-200 text-zinc-500 text-xs cursor-not-allowed focus:outline-none"
-                  disabled
+                  className="w-full px-3 py-2 rounded-lg bg-white border border-zinc-200 text-zinc-900 text-xs focus:outline-none focus:border-zinc-950"
                 />
               </div>
 
