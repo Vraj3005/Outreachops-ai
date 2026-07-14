@@ -789,7 +789,10 @@ class ImportService:
         source_id = None
         if supabase:
             try:
+                import uuid
+
                 source_payload = {
+                    "id": str(uuid.uuid4()),
                     "user_id": user_id,
                     "source_type": source_type,
                     "name": source_name,
