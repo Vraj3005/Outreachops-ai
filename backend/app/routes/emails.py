@@ -52,17 +52,80 @@ async def trigger_send_approved_emails(owner: dict = Depends(require_owner)):
             now_str = datetime.datetime.now(datetime.UTC).isoformat()
             idempotency_key = f"send_draft_{draft['id']}"
 
-            campaign_id = draft.get("campaign_id") or "default-campaign"
+            campaign_id = draft.get("campaign_id")
             lead_id = draft.get("lead_id")
 
-            cl_res = (
-                supabase.table("campaign_leads")
-                .select("current_sequence_step")
-                .eq("campaign_id", campaign_id)
-                .eq("lead_id", lead_id)
-                .execute()
-            )
-            step_num = cl_res.data[0]["current_sequence_step"] if cl_res.data else 1
+            # Fallback 1: Query campaign_leads for this lead's enrollment
+            if (not campaign_id or campaign_id == "default-campaign") and lead_id:
+                try:
+                    cl_check = (
+                        supabase.table("campaign_leads")
+                        .select("campaign_id")
+                        .eq("lead_id", lead_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if cl_check.data:
+                        campaign_id = cl_check.data[0]["campaign_id"]
+                except Exception as e:
+                    logger.warning(f"Error checking lead campaign enrollment: {e}")
+
+            # Fallback 2: Query first active campaign for the user
+            if not campaign_id or campaign_id == "default-campaign":
+                try:
+                    camp_list = (
+                        supabase.table("campaigns")
+                        .select("id")
+                        .eq("user_id", user_id)
+                        .eq("status", "active")
+                        .limit(1)
+                        .execute()
+                    )
+                    if not camp_list.data:
+                        camp_list = (
+                            supabase.table("campaigns")
+                            .select("id")
+                            .eq("user_id", user_id)
+                            .limit(1)
+                            .execute()
+                        )
+                    if camp_list.data:
+                        campaign_id = camp_list.data[0]["id"]
+                except Exception as e:
+                    logger.warning(f"Error fetching campaign fallback: {e}")
+
+            if not campaign_id or campaign_id == "default-campaign":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Cannot schedule draft {draft['id']} because no valid campaign is linked or exists.",
+                )
+
+            # Query current sequence step number from enrollment
+            step_num = 1
+            if lead_id:
+                cl_res = (
+                    supabase.table("campaign_leads")
+                    .select("current_sequence_step")
+                    .eq("campaign_id", campaign_id)
+                    .eq("lead_id", lead_id)
+                    .execute()
+                )
+                step_num = cl_res.data[0]["current_sequence_step"] if cl_res.data else 1
+
+            # Fetch the actual sequence step UUID from sequence_steps table
+            step_id = None
+            try:
+                step_res = (
+                    supabase.table("sequence_steps")
+                    .select("id")
+                    .eq("sequence_id", campaign_id)
+                    .eq("step_number", step_num)
+                    .execute()
+                )
+                if step_res.data:
+                    step_id = step_res.data[0]["id"]
+            except Exception as e:
+                logger.error(f"Error querying sequence step UUID: {e}")
 
             supabase.table("scheduled_emails").insert(
                 {
@@ -71,7 +134,7 @@ async def trigger_send_approved_emails(owner: dict = Depends(require_owner)):
                     "draft_id": draft["id"],
                     "campaign_id": campaign_id,
                     "lead_id": lead_id,
-                    "sequence_step_id": str(step_num),
+                    "sequence_step_id": step_id,
                     "scheduled_at": now_str,
                     "scheduled_for": now_str,
                     "status": "pending",
