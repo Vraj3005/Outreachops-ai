@@ -247,6 +247,31 @@ async def cancel_scheduled_email(id: str, owner: dict = Depends(require_owner)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.delete("/queue/{id}")
+async def delete_scheduled_email(id: str, owner: dict = Depends(require_owner)):
+    """
+    Deletes a scheduled email row from the queue.
+    """
+    try:
+        # Check ownership
+        job_res = (
+            supabase.table("scheduled_emails")
+            .select("*")
+            .eq("id", id)
+            .eq("user_id", owner["id"])
+            .execute()
+        )
+        if not job_res.data:
+            raise HTTPException(status_code=404, detail="Scheduled email job not found")
+
+        supabase.table("scheduled_emails").delete().eq("id", id).execute()
+        return {"status": "success", "message": "Scheduled email deleted."}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/worker-health")
 async def get_sending_worker_health(owner: dict = Depends(require_owner)):
     """

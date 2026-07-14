@@ -28,12 +28,14 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const router = useRouter();
   const { toast } = useToast();
 
-  const [checkingAuth, setCheckingAuth] = React.useState(true);
-  const [userEmail, setUserEmail] = React.useState("yash69699696@gmail.com");
-  const [gmailStatus, setGmailStatus] = React.useState("checking");
-  const [sheetsStatus, setSheetsStatus] = React.useState("checking");
-  const [geminiStatus, setGeminiStatus] = React.useState("checking");
-  const [dbStatus, setDbStatus] = React.useState("checking");
+  const [checkingAuth, setCheckingAuth] = React.useState(() => {
+    return globalDiagnosticsCache ? false : true;
+  });
+  const [userEmail, setUserEmail] = React.useState(() => globalDiagnosticsCache?.userEmail || "yash69699696@gmail.com");
+  const [gmailStatus, setGmailStatus] = React.useState(() => globalDiagnosticsCache?.gmail || "checking");
+  const [sheetsStatus, setSheetsStatus] = React.useState(() => globalDiagnosticsCache?.sheets || "checking");
+  const [geminiStatus, setGeminiStatus] = React.useState(() => globalDiagnosticsCache?.gemini || "checking");
+  const [dbStatus, setDbStatus] = React.useState(() => globalDiagnosticsCache?.db || "checking");
 
   React.useEffect(() => {
     const checkAuthAndDiagnostics = async () => {

@@ -7,7 +7,8 @@ import { supabase } from "@/lib/supabase";
 import { 
   Clock, RefreshCw, AlertTriangle, CheckCircle, 
   XCircle, RotateCcw, Ban, Activity, Filter,
-  Play, Pause, Cpu, Database, AlertCircle, ShieldAlert
+  Play, Pause, Cpu, Database, AlertCircle, ShieldAlert,
+  Trash2
 } from "lucide-react";
 
 interface ScheduledEmail {
@@ -160,6 +161,33 @@ export default function QueuePage() {
         fetchQueueAndHealth();
       } else {
         toast("Failed to cancel dispatch.", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Connection error", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Are you sure you want to permanently delete this email from the sending queue?")) {
+      return;
+    }
+    setActionLoading(id);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${API_URL}/api/v1/emails/queue/${id}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${token}`
+        }
+      });
+      if (res.ok) {
+        toast("Email queue item deleted.", "info");
+        fetchQueueAndHealth();
+      } else {
+        toast("Failed to delete queue item.", "error");
       }
     } catch (e) {
       console.error(e);
@@ -360,6 +388,14 @@ export default function QueuePage() {
                                 <Ban className="w-3.5 h-3.5" />
                               </button>
                             )}
+                            <button
+                              onClick={() => handleDelete(item.id)}
+                              disabled={actionLoading !== null}
+                              className="p-1 text-rose-700 hover:bg-rose-100 border border-zinc-200 bg-white rounded shadow-sm transition-all"
+                              title="Delete from queue"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </td>
                       </tr>
