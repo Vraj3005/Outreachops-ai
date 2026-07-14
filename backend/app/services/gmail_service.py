@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import HTTPException
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow, InstalledAppFlow
 from googleapiclient.discovery import build
 
 from app.config import settings
@@ -158,6 +158,61 @@ class GmailService:
             "status": "disconnected",
             "details": "Gmail OAuth credentials have expired.",
         }
+
+    def get_authorization_url(self, user_id: str, redirect_uri: str) -> tuple[str, str]:
+        """
+        Generates a Google OAuth authorization URL for the web production flow.
+        Returns a tuple of (authorization_url, state).
+        """
+        if not self.creds_path or not os.path.exists(self.creds_path):
+            raise MissingCredentialsError(
+                message="Missing gmail_credentials.json. Cannot run OAuth flow."
+            )
+
+        flow = Flow.from_client_secrets_file(
+            self.creds_path, scopes=self.scopes, redirect_uri=redirect_uri
+        )
+        import uuid
+
+        state_token = f"{user_id}:{uuid.uuid4().hex}"
+
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+            state=state_token,
+        )
+        return auth_url, state_token
+
+    def exchange_callback_code(
+        self, user_id: str, code: str, redirect_uri: str
+    ) -> dict[str, Any]:
+        """
+        Exchanges the authorization code from Google callback for credentials.
+        Saves credentials securely to the database.
+        """
+        if not self.creds_path or not os.path.exists(self.creds_path):
+            raise MissingCredentialsError(
+                message="Missing gmail_credentials.json. Cannot run OAuth flow."
+            )
+
+        try:
+            flow = Flow.from_client_secrets_file(
+                self.creds_path, scopes=self.scopes, redirect_uri=redirect_uri
+            )
+            flow.fetch_token(code=code)
+            creds = flow.credentials
+
+            # Save in database
+            self._save_db_credentials(user_id, creds)
+            logger.info("Gmail OAuth authentication successful via web callback.")
+            return {
+                "status": "connected",
+                "message": "Successfully authenticated and cached token.",
+            }
+        except Exception as e:
+            logger.error(f"Gmail OAuth exchange code crashed: {e}")
+            return {"status": "failed", "error": str(e)}
 
     def run_oauth_flow(self, user_id: str) -> dict[str, Any]:
         """

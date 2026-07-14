@@ -43,8 +43,10 @@ class Settings(BaseSettings):
     GEMINI_DELAY: int = 6
     SEND_DELAY: int = 5
 
-    # App Port
+    # App Port and URLs
     PORT: int = 8000
+    BACKEND_URL: str = "http://localhost:8000"
+    FRONTEND_URL: str = "http://localhost:3000"
 
     # Server-side encryption key
     ENCRYPTION_KEY: str = ""

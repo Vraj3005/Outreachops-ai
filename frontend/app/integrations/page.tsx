@@ -69,6 +69,19 @@ export default function IntegrationsPage() {
 
   useEffect(() => {
     fetchStatuses();
+    
+    // Check if redirect query parameters are present
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("success") === "true") {
+        toast("Gmail authentication successful!", "success");
+        // Clear the parameters from the URL
+        window.history.replaceState({}, document.title, window.location.pathname);
+      } else if (params.get("error")) {
+        toast(`Gmail authentication failed: ${params.get("error")}`, "error");
+        window.history.replaceState({}, document.title, window.location.pathname);
+      }
+    }
   }, []);
 
   // Connect Gmail OAuth
@@ -78,8 +91,13 @@ export default function IntegrationsPage() {
     try {
       const res = await fetch(`${API_URL}/api/v1/integrations/gmail/connect`, { method: "POST" });
       if (res.ok) {
-        toast("Gmail authentication successful!", "success");
-        fetchStatuses();
+        const data = await res.json();
+        if (data.status === "redirect" && data.url) {
+          window.location.href = data.url;
+        } else {
+          toast("Gmail authentication successful!", "success");
+          fetchStatuses();
+        }
       } else {
         const err = await res.json();
         toast(err.detail || "OAuth flow failed.", "error");

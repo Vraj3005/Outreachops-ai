@@ -94,6 +94,14 @@ Stores custom mappings for spreadsheet columns.
 * `user_id` (TEXT)
 * `mapping_json` (TEXT, JSON dictionary mapping headers to lead attributes)
 
+### VII. `import_cache`
+Stores temporary cached data rows and columns to enable stateless multi-instance uploads.
+* `fingerprint` (TEXT, Primary Key)
+* `headers` (TEXT, JSON serialized headers list)
+* `rows` (TEXT, JSON serialized rows data)
+* `validation_logs` (TEXT, JSON serialized mapping error previews)
+* `created_at` (TEXT, timestamp)
+
 ---
 
 ## 3. Database Indexing
@@ -163,4 +171,13 @@ ON scheduled_emails (status, scheduled_for);
 
 CREATE INDEX IF NOT EXISTS idx_leads_user_status_v2
 ON leads (user_id, lead_status);
+
+-- 4. Create import_cache table for stateless multi-instance uploads
+CREATE TABLE IF NOT EXISTS import_cache (
+    fingerprint TEXT PRIMARY KEY,
+    headers TEXT NOT NULL,
+    rows TEXT NOT NULL,
+    validation_logs TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 ```

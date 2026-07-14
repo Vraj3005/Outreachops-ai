@@ -21,6 +21,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.config import settings
 from app.database import init_db
 from app.routes import (
     analytics,
@@ -79,7 +80,7 @@ app.add_middleware(LoggingMiddleware)
 register_error_handlers(app)
 
 # Secure CORS Middleware config
-frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+frontend_url = settings.FRONTEND_URL
 origins = [orig.strip() for orig in frontend_url.split(",") if orig.strip()]
 
 app.add_middleware(

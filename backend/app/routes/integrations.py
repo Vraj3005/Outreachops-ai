@@ -2,7 +2,8 @@ import json
 import logging
 
 import gspread
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import RedirectResponse
 from google import genai
 from google.oauth2.service_account import Credentials
 from pydantic import BaseModel, Field
@@ -84,51 +85,90 @@ async def get_gmail_status(owner: dict = Depends(require_owner)):
 
 
 @router.post("/gmail/connect")
-async def connect_gmail_account(owner: dict = Depends(require_owner)):
+async def connect_gmail_account(request: Request, owner: dict = Depends(require_owner)):
     """
-    Start Gmail OAuth connection flow.
-    Launches authentication server locally and caches credentials.
+    Start Gmail OAuth connection flow by returning the Google authorization URL.
     """
     user_id = owner["id"]
     if settings.DEMO_MODE:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="OAuth token creation is disabled in demo mode.",
-        )
+        return {"status": "success", "message": "Demo mode connection active."}
 
-    res = gmail_service.run_oauth_flow(user_id)
-    if res.get("status") == "failed":
+    redirect_uri = f"{settings.BACKEND_URL}/api/v1/integrations/oauth2callback"
+    try:
+        auth_url, state = gmail_service.get_authorization_url(user_id, redirect_uri)
+        return {
+            "status": "redirect",
+            "url": auth_url,
+            "message": "Redirect user to authorization URL.",
+        }
+    except Exception as e:
+        logger.error(f"Failed to generate Google OAuth URL: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"OAuth connection failed: {res.get('error')}",
+            detail=str(e),
         )
 
-    # Attempt to cache connected email address once on successful connection
+
+@router.get("/oauth2callback")
+async def gmail_oauth_callback(code: str = None, state: str = None, error: str = None):
+    """
+    Handles Google OAuth redirect callback.
+    Exchanges authorization code for tokens, caches them in database,
+    and redirects the owner back to the frontend integration settings page.
+    """
+    frontend_redirect_url = settings.FRONTEND_URL.rstrip("/") + "/integrations"
+
+    if error:
+        logger.error(f"Gmail OAuth callback error: {error}")
+        return RedirectResponse(url=f"{frontend_redirect_url}?error={error}")
+
+    if not code or not state:
+        logger.error("Gmail OAuth callback missing code or state parameters.")
+        return RedirectResponse(url=f"{frontend_redirect_url}?error=missing_parameters")
+
     try:
-        client = gmail_service._get_gmail_client(user_id)
-        profile = client.users().getProfile(userId="me").execute()
-        email_addr = profile.get("emailAddress", "Connected Owner Account")
-
-        # Merge email back into integration_connections credentials
-        db_res = (
-            supabase.table("integration_connections")
-            .select("*")
-            .eq("user_id", user_id)
-            .eq("provider", "gmail")
-            .execute()
-        )
-        if db_res.data:
-            dec = decrypt_val(db_res.data[0]["encrypted_credentials"])
-            info = json.loads(dec)
-            info["email"] = email_addr
-            encrypted = encrypt_val(json.dumps(info))
-            supabase.table("integration_connections").update(
-                {"encrypted_credentials": encrypted}
-            ).eq("id", db_res.data[0]["id"]).execute()
+        parts = state.split(":", 1)
+        user_id = parts[0]
     except Exception as e:
-        logger.warning(f"Could not retrieve Gmail profile details: {e}")
+        logger.error(f"Invalid state format in OAuth callback: {e}")
+        return RedirectResponse(url=f"{frontend_redirect_url}?error=invalid_state")
 
-    return res
+    redirect_uri = f"{settings.BACKEND_URL}/api/v1/integrations/oauth2callback"
+    try:
+        res = gmail_service.exchange_callback_code(user_id, code, redirect_uri)
+        if res.get("status") == "failed":
+            error_msg = res.get("error", "OAuth exchange failed")
+            return RedirectResponse(url=f"{frontend_redirect_url}?error={error_msg}")
+
+        # Authenticate email and merge into DB
+        try:
+            client = gmail_service._get_gmail_client(user_id)
+            profile = client.users().getProfile(userId="me").execute()
+            email_addr = profile.get("emailAddress", "Connected Owner Account")
+
+            # Merge email back into integration_connections credentials
+            db_res = (
+                supabase.table("integration_connections")
+                .select("*")
+                .eq("user_id", user_id)
+                .eq("provider", "gmail")
+                .execute()
+            )
+            if db_res.data:
+                dec = decrypt_val(db_res.data[0]["encrypted_credentials"])
+                info = json.loads(dec)
+                info["email"] = email_addr
+                encrypted = encrypt_val(json.dumps(info))
+                supabase.table("integration_connections").update(
+                    {"encrypted_credentials": encrypted}
+                ).eq("id", db_res.data[0]["id"]).execute()
+        except Exception as e:
+            logger.warning(f"Could not retrieve Gmail profile details: {e}")
+
+        return RedirectResponse(url=f"{frontend_redirect_url}?success=true")
+    except Exception as e:
+        logger.error(f"Failed to complete OAuth callback flow: {e}")
+        return RedirectResponse(url=f"{frontend_redirect_url}?error={str(e)}")
 
 
 @router.post("/gmail/disconnect")
