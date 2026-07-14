@@ -1202,6 +1202,17 @@ export default function LeadsPage() {
           </button>
 
           <button 
+            onClick={() => {
+              setGenerateForAll(false);
+              setShowGenModal(true);
+            }}
+            className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-full text-[10px] font-bold shadow-sm transition-all"
+          >
+            <Sparkles className="w-3 h-3 text-white" />
+            Generate AI Drafts
+          </button>
+
+          <button 
             onClick={() => { setShowBulkEnrollModal(true); }}
             className="inline-flex items-center gap-1 px-3 py-1.5 bg-zinc-50 hover:bg-zinc-100 border border-zinc-200 text-zinc-700 rounded-full text-[10px] font-bold shadow-sm"
           >
