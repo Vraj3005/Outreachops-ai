@@ -76,8 +76,12 @@ CREATE TABLE IF NOT EXISTS prompt_versions (
     template_id UUID REFERENCES prompt_templates(id) ON DELETE CASCADE NOT NULL,
     version TEXT NOT NULL DEFAULT '1.0.0',
     template_text TEXT NOT NULL,
+    status TEXT DEFAULT 'published',
+    description TEXT,
+    changelog TEXT,
     is_active BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 6. SEQUENCE STEPS TABLE
