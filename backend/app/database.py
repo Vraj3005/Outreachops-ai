@@ -746,6 +746,16 @@ class SQLiteSupabaseClient:
             UNIQUE(user_id, provider)
         )""")
 
+        # import_cache (for stateless multi-instance file parsing and validation mapping)
+        cursor.execute("""
+        CREATE TABLE IF NOT EXISTS import_cache (
+            fingerprint TEXT PRIMARY KEY,
+            headers TEXT NOT NULL,
+            rows TEXT NOT NULL,
+            validation_logs TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )""")
+
         # --- V2 ALTERS ON EXISTING TABLES ---
         # Alter Campaigns Table
         self._add_column_if_missing(cursor, "campaigns", "objective", "TEXT")

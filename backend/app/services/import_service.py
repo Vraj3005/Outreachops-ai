@@ -82,15 +82,37 @@ class ImportService:
         fingerprint = self.calculate_fingerprint(contents)
         cache_path = self.get_cache_path(fingerprint)
 
-        # If already cached, return metadata immediately
-        if os.path.exists(cache_path):
-            with open(cache_path, encoding="utf-8") as f:
-                cached = json.load(f)
+        # Check cache in DB or local file
+        cached_data = None
+        if supabase:
+            try:
+                res = (
+                    supabase.table("import_cache")
+                    .select("*")
+                    .eq("fingerprint", fingerprint)
+                    .execute()
+                )
+                if res.data:
+                    cached_data = {
+                        "headers": json.loads(res.data[0]["headers"]),
+                        "rows": json.loads(res.data[0]["rows"]),
+                    }
+            except Exception:
+                pass
+
+        if not cached_data and os.path.exists(cache_path):
+            try:
+                with open(cache_path, encoding="utf-8") as f:
+                    cached_data = json.load(f)
+            except Exception:
+                pass
+
+        if cached_data:
             return {
                 "fingerprint": fingerprint,
-                "headers": cached["headers"],
-                "sample_rows": cached["rows"][:5],
-                "total_rows": len(cached["rows"]),
+                "headers": cached_data["headers"],
+                "sample_rows": cached_data["rows"][:5],
+                "total_rows": len(cached_data["rows"]),
             }
 
         headers: list[str] = []
@@ -211,10 +233,25 @@ class ImportService:
                 seen_headers[h_clean] = 1
                 unique_headers.append(h_clean)
 
-        # Cache data in temporary scratch file
+        # Cache data in temporary scratch file and database
         cache_data = {"headers": unique_headers, "rows": rows}
-        with open(cache_path, "w", encoding="utf-8") as f:
-            json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+        if supabase:
+            try:
+                supabase.table("import_cache").upsert(
+                    {
+                        "fingerprint": fingerprint,
+                        "headers": json.dumps(unique_headers),
+                        "rows": json.dumps(rows),
+                    }
+                ).execute()
+            except Exception as e:
+                logger.error(f"Failed to save parse cache to database: {e}")
 
         return {
             "fingerprint": fingerprint,
@@ -267,8 +304,23 @@ class ImportService:
 
         # Save cache
         cache_path = self.get_cache_path(fingerprint)
-        with open(cache_path, "w", encoding="utf-8") as f:
-            f.write(data_serialized)
+        try:
+            with open(cache_path, "w", encoding="utf-8") as f:
+                f.write(data_serialized)
+        except Exception:
+            pass
+
+        if supabase:
+            try:
+                supabase.table("import_cache").upsert(
+                    {
+                        "fingerprint": fingerprint,
+                        "headers": json.dumps(unique_headers),
+                        "rows": json.dumps(rows),
+                    }
+                ).execute()
+            except Exception as e:
+                logger.error(f"Failed to save Google Sheet cache to database: {e}")
 
         return {
             "fingerprint": fingerprint,
@@ -354,15 +406,40 @@ class ImportService:
         Loads the cached import file. Mapped target values are validated.
         Checks for row duplicates and existing DB contacts.
         """
-        cache_path = self.get_cache_path(fingerprint)
-        if not os.path.exists(cache_path):
-            raise ValueError("Import payload session has expired. Please re-upload.")
+        headers = []
+        rows = []
+        cached_data = None
 
-        with open(cache_path, encoding="utf-8") as f:
-            cached = json.load(f)
+        if supabase:
+            try:
+                res = (
+                    supabase.table("import_cache")
+                    .select("*")
+                    .eq("fingerprint", fingerprint)
+                    .execute()
+                )
+                if res.data:
+                    cached_data = res.data[0]
+                    headers = json.loads(cached_data["headers"])
+                    rows = json.loads(cached_data["rows"])
+            except Exception:
+                pass
 
-        headers = cached["headers"]
-        rows = cached["rows"]
+        if not headers or not rows:
+            cache_path = self.get_cache_path(fingerprint)
+            if not os.path.exists(cache_path):
+                raise ValueError(
+                    "Import payload session has expired. Please re-upload."
+                )
+            try:
+                with open(cache_path, encoding="utf-8") as f:
+                    cached = json.load(f)
+                headers = cached["headers"]
+                rows = cached["rows"]
+            except Exception:
+                raise ValueError(
+                    "Import payload session has expired. Please re-upload."
+                )
 
         valid_records: list[dict[str, Any]] = []
         row_logs: list[dict[str, Any]] = []
@@ -474,9 +551,21 @@ class ImportService:
             )
 
         # Save the validation row logs in cache for downloading error CSV files later
+        cache_path = self.get_cache_path(fingerprint)
         log_cache_path = cache_path.replace(".json", "_validation_logs.json")
-        with open(log_cache_path, "w", encoding="utf-8") as f:
-            json.dump(row_logs, f, ensure_ascii=False, indent=2)
+        try:
+            with open(log_cache_path, "w", encoding="utf-8") as f:
+                json.dump(row_logs, f, ensure_ascii=False, indent=2)
+        except Exception:
+            pass
+
+        if supabase:
+            try:
+                supabase.table("import_cache").update(
+                    {"validation_logs": json.dumps(row_logs)}
+                ).eq("fingerprint", fingerprint).execute()
+            except Exception as e:
+                logger.error(f"Failed to update validation logs cache to database: {e}")
 
         return {
             "fingerprint": fingerprint,
@@ -489,18 +578,36 @@ class ImportService:
 
     def generate_error_csv(self, fingerprint: str) -> str:
         """Loads cached validation logs and returns CSV containing all error details."""
-        cache_path = self.get_cache_path(fingerprint)
-        log_cache_path = cache_path.replace(".json", "_validation_logs.json")
+        headers = []
+        row_logs = []
 
-        if not os.path.exists(cache_path) or not os.path.exists(log_cache_path):
-            raise ValueError("Error log session has expired. Re-run validation.")
+        if supabase:
+            try:
+                res = (
+                    supabase.table("import_cache")
+                    .select("*")
+                    .eq("fingerprint", fingerprint)
+                    .execute()
+                )
+                if res.data and res.data[0].get("validation_logs"):
+                    headers = json.loads(res.data[0]["headers"])
+                    row_logs = json.loads(res.data[0]["validation_logs"])
+            except Exception:
+                pass
 
-        with open(cache_path, encoding="utf-8") as f:
-            cached_file = json.load(f)
-        headers = cached_file["headers"]
-
-        with open(log_cache_path, encoding="utf-8") as f:
-            row_logs = json.load(f)
+        if not headers or not row_logs:
+            cache_path = self.get_cache_path(fingerprint)
+            log_cache_path = cache_path.replace(".json", "_validation_logs.json")
+            if not os.path.exists(cache_path) or not os.path.exists(log_cache_path):
+                raise ValueError("Error log session has expired. Re-run validation.")
+            try:
+                with open(cache_path, encoding="utf-8") as f:
+                    cached_file = json.load(f)
+                headers = cached_file["headers"]
+                with open(log_cache_path, encoding="utf-8") as f:
+                    row_logs = json.load(f)
+            except Exception:
+                raise ValueError("Error log session has expired. Re-run validation.")
 
         def escape_csv_val(val):
             if val is None:
@@ -543,15 +650,40 @@ class ImportService:
         """
         # 1. Validate and fetch valid records
         validation = self.validate_records(fingerprint, field_mapping, user_id)
-        cache_path = self.get_cache_path(fingerprint)
+        headers = []
+        row_logs = []
+        cached = {}
 
-        with open(cache_path, encoding="utf-8") as f:
-            cached = json.load(f)
+        if supabase:
+            try:
+                res = (
+                    supabase.table("import_cache")
+                    .select("*")
+                    .eq("fingerprint", fingerprint)
+                    .execute()
+                )
+                if res.data and res.data[0].get("validation_logs"):
+                    headers = json.loads(res.data[0]["headers"])
+                    row_logs = json.loads(res.data[0]["validation_logs"])
+                    cached = {
+                        "headers": headers,
+                        "rows": json.loads(res.data[0]["rows"]),
+                    }
+            except Exception:
+                pass
 
-        # Resolve validation details
-        log_cache_path = cache_path.replace(".json", "_validation_logs.json")
-        with open(log_cache_path, encoding="utf-8") as f:
-            row_logs = json.load(f)
+        if not headers or not row_logs:
+            cache_path = self.get_cache_path(fingerprint)
+            if not os.path.exists(cache_path):
+                raise ValueError("Error log session has expired. Re-run validation.")
+            try:
+                with open(cache_path, encoding="utf-8") as f:
+                    cached = json.load(f)
+                log_cache_path = cache_path.replace(".json", "_validation_logs.json")
+                with open(log_cache_path, encoding="utf-8") as f:
+                    row_logs = json.load(f)
+            except Exception:
+                raise ValueError("Error log session has expired. Re-run validation.")
 
         valid_records = []
         for log in row_logs:
