@@ -44,9 +44,10 @@ class GmailService:
             if os.path.exists(alt_path):
                 self.token_path = alt_path
         self.scopes = [
-            "https://www.googleapis.com/auth/gmail.send",
-            "https://www.googleapis.com/auth/gmail.readonly",
+            "openid",
             "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/gmail.readonly",
+            "https://www.googleapis.com/auth/gmail.send",
         ]
 
     def _get_db_credentials(self, user_id: str):

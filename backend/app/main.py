@@ -1,6 +1,9 @@
 import base64
 import os
 
+# Relax OAuth scopes verification in oauthlib to ignore openid adjustments
+os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
+
 # Auto-decode base64 credentials from environment variables on startup
 for env_name, file_path in [
     ("GMAIL_CREDENTIALS_B64", "gmail_credentials.json"),
