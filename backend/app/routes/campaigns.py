@@ -678,10 +678,11 @@ async def save_campaign_sequence_steps(
                     "name": step.name,
                     "delay_amount": step.delay_amount,
                     "delay_unit": step.delay_unit,
-                    "body_template_version_id": step.body_template_version_id,
-                    "subject_template_version_id": step.subject_template_version_id,
+                    "body_template_version_id": step.body_template_version_id or None,
+                    "subject_template_version_id": step.subject_template_version_id
+                    or None,
                     "custom_instructions": step.custom_instructions,
-                    "require_manual_approval": 1 if step.require_manual_approval else 0,
+                    "require_manual_approval": step.require_manual_approval,
                 }
             )
 

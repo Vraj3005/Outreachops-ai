@@ -290,11 +290,11 @@ class GenerationWorker:
         # 4. Fetch prompt version template
         template_text = None
         prompt_ver_id = job.get("prompt_version")
-        if prompt_ver_id:
+        if prompt_ver_id and prompt_ver_id.strip():
             pv_res = (
                 supabase.table("prompt_versions")
                 .select("*")
-                .eq("id", prompt_ver_id)
+                .eq("id", prompt_ver_id.strip())
                 .execute()
             )
             if pv_res.data:
@@ -304,11 +304,11 @@ class GenerationWorker:
         if not template_text:
             template_text = campaign.get("prompt_template_id") or ""
             # If it's a UUID/ID, query prompt_templates
-            if len(template_text) < 50:
+            if template_text and template_text.strip() and len(template_text) < 50:
                 pt_res = (
                     supabase.table("prompt_templates")
                     .select("*")
-                    .eq("id", template_text)
+                    .eq("id", template_text.strip())
                     .execute()
                 )
                 if pt_res.data:
