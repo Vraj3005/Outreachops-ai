@@ -100,7 +100,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         const res = await fetch(`${API_URL}/api/v1/health`);
         if (res.ok) {
           const data = await res.json();
-          setDbStatus(data.database?.status || "failed");
+          setDbStatus(data.database || "failed");
         } else {
           setDbStatus("failed");
         }
@@ -139,6 +139,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     const isSuccess = status === "connected";
     const isWarning = status === "expired" || status === "testing";
     const isChecking = status === "checking";
+    const isUnconfigured = status === "unconfigured" || status === "disconnected";
     
     if (isSuccess) {
       return {
@@ -156,6 +157,11 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       return {
         wrapper: "text-zinc-400 bg-zinc-50 border-zinc-200/60",
         dot: "bg-zinc-300 animate-pulse"
+      };
+    } else if (isUnconfigured) {
+      return {
+        wrapper: "text-zinc-500 bg-zinc-50 border-zinc-200/60",
+        dot: "bg-zinc-400"
       };
     } else {
       return {
