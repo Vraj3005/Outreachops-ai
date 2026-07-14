@@ -33,7 +33,16 @@ class GmailService:
         self.creds_path = (
             os.getenv("GMAIL_CREDENTIALS_PATH") or settings.GMAIL_CREDENTIALS_PATH
         )
+        if self.creds_path and not os.path.exists(self.creds_path):
+            alt_path = os.path.join("backend", self.creds_path)
+            if os.path.exists(alt_path):
+                self.creds_path = alt_path
+
         self.token_path = os.getenv("GMAIL_TOKEN_PATH") or settings.GMAIL_TOKEN_PATH
+        if self.token_path and not os.path.exists(self.token_path):
+            alt_path = os.path.join("backend", self.token_path)
+            if os.path.exists(alt_path):
+                self.token_path = alt_path
         self.scopes = ["https://www.googleapis.com/auth/gmail.send"]
 
     def _get_db_credentials(self, user_id: str):

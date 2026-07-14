@@ -120,25 +120,35 @@ async def gmail_oauth_callback(code: str = None, state: str = None, error: str =
 
     if error:
         logger.error(f"Gmail OAuth callback error: {error}")
-        return RedirectResponse(url=f"{frontend_redirect_url}?error={error}")
+        return RedirectResponse(
+            url=f"{frontend_redirect_url}?error={error}", status_code=302
+        )
 
     if not code or not state:
         logger.error("Gmail OAuth callback missing code or state parameters.")
-        return RedirectResponse(url=f"{frontend_redirect_url}?error=missing_parameters")
+        return RedirectResponse(
+            url=f"{frontend_redirect_url}?error=missing_parameters",
+            status_code=302,
+        )
 
     try:
         parts = state.split(":", 1)
         user_id = parts[0]
     except Exception as e:
         logger.error(f"Invalid state format in OAuth callback: {e}")
-        return RedirectResponse(url=f"{frontend_redirect_url}?error=invalid_state")
+        return RedirectResponse(
+            url=f"{frontend_redirect_url}?error=invalid_state", status_code=302
+        )
 
     redirect_uri = f"{settings.BACKEND_URL}/api/v1/integrations/oauth2callback"
     try:
         res = gmail_service.exchange_callback_code(user_id, code, redirect_uri)
         if res.get("status") == "failed":
             error_msg = res.get("error", "OAuth exchange failed")
-            return RedirectResponse(url=f"{frontend_redirect_url}?error={error_msg}")
+            return RedirectResponse(
+                url=f"{frontend_redirect_url}?error={error_msg}",
+                status_code=302,
+            )
 
         # Authenticate email and merge into DB
         try:
@@ -165,10 +175,14 @@ async def gmail_oauth_callback(code: str = None, state: str = None, error: str =
         except Exception as e:
             logger.warning(f"Could not retrieve Gmail profile details: {e}")
 
-        return RedirectResponse(url=f"{frontend_redirect_url}?success=true")
+        return RedirectResponse(
+            url=f"{frontend_redirect_url}?success=true", status_code=302
+        )
     except Exception as e:
         logger.error(f"Failed to complete OAuth callback flow: {e}")
-        return RedirectResponse(url=f"{frontend_redirect_url}?error={str(e)}")
+        return RedirectResponse(
+            url=f"{frontend_redirect_url}?error={str(e)}", status_code=302
+        )
 
 
 @router.post("/gmail/disconnect")

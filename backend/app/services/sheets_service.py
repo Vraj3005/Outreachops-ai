@@ -22,6 +22,10 @@ class SheetsService:
             os.getenv("GOOGLE_SHEETS_CREDENTIALS_PATH")
             or settings.SHEETS_CREDENTIALS_PATH
         ).strip()
+        if self.creds_path and not os.path.exists(self.creds_path):
+            alt_path = os.path.join("backend", self.creds_path)
+            if os.path.exists(alt_path):
+                self.creds_path = alt_path
         self.sheet_name = settings.GOOGLE_SHEET_NAME.strip()
         self.main_tab = settings.MAIN_TAB_NAME.strip()
 
