@@ -13,6 +13,16 @@ interface SidebarLayoutProps {
   children: React.ReactNode;
 }
 
+interface CachedDiagnosticStatus {
+  gmail: string;
+  sheets: string;
+  gemini: string;
+  db: string;
+  userEmail: string;
+}
+
+let globalDiagnosticsCache: CachedDiagnosticStatus | null = null;
+
 export default function SidebarLayout({ children }: SidebarLayoutProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -53,20 +63,43 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       }
       setCheckingAuth(false);
 
-      // 2. Load Diagnostics status indicators
+      // 2. Load Diagnostics status indicators from cache if available
+      if (globalDiagnosticsCache) {
+        setGmailStatus(globalDiagnosticsCache.gmail);
+        setSheetsStatus(globalDiagnosticsCache.sheets);
+        setGeminiStatus(globalDiagnosticsCache.gemini);
+        setDbStatus(globalDiagnosticsCache.db);
+        setUserEmail(globalDiagnosticsCache.userEmail);
+        return;
+      }
+
       const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+      let fetchedGmail = "failed";
+      let fetchedSheets = "failed";
+      let fetchedGemini = "failed";
+      let fetchedDb = "failed";
+      let currentEmail = userEmail;
+
+      if (supabase) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user?.email) {
+            currentEmail = session.user.email;
+          }
+        } catch (e) {
+          // ignore
+        }
+      }
       
       // Gmail status
       try {
         const res = await fetch(`${API_URL}/api/v1/integrations/gmail/status`);
         if (res.ok) {
           const data = await res.json();
-          setGmailStatus(data.status || "disconnected");
-        } else {
-          setGmailStatus("failed");
+          fetchedGmail = data.status || "disconnected";
         }
       } catch (e) {
-        setGmailStatus("failed");
+        // ignore
       }
 
       // Sheets status
@@ -74,12 +107,10 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         const res = await fetch(`${API_URL}/api/v1/integrations/sheets/status`);
         if (res.ok) {
           const data = await res.json();
-          setSheetsStatus(data.status || "unconfigured");
-        } else {
-          setSheetsStatus("failed");
+          fetchedSheets = data.status || "unconfigured";
         }
       } catch (e) {
-        setSheetsStatus("failed");
+        // ignore
       }
 
       // Gemini status
@@ -87,12 +118,10 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         const res = await fetch(`${API_URL}/api/v1/integrations/gemini/status`);
         if (res.ok) {
           const data = await res.json();
-          setGeminiStatus(data.status || "unconfigured");
-        } else {
-          setGeminiStatus("failed");
+          fetchedGemini = data.status || "unconfigured";
         }
       } catch (e) {
-        setGeminiStatus("failed");
+        // ignore
       }
 
       // Database health
@@ -100,13 +129,27 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         const res = await fetch(`${API_URL}/api/v1/health`);
         if (res.ok) {
           const data = await res.json();
-          setDbStatus(data.database || "failed");
-        } else {
-          setDbStatus("failed");
+          fetchedDb = data.database || "failed";
         }
       } catch (e) {
-        setDbStatus("failed");
+        // ignore
       }
+
+      // Update state
+      setGmailStatus(fetchedGmail);
+      setSheetsStatus(fetchedSheets);
+      setGeminiStatus(fetchedGemini);
+      setDbStatus(fetchedDb);
+      setUserEmail(currentEmail);
+
+      // Save to static global cache
+      globalDiagnosticsCache = {
+        gmail: fetchedGmail,
+        sheets: fetchedSheets,
+        gemini: fetchedGemini,
+        db: fetchedDb,
+        userEmail: currentEmail
+      };
     };
 
     checkAuthAndDiagnostics();

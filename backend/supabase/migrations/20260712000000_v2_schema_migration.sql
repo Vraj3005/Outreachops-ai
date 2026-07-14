@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS owner_settings (
     sender_phone TEXT,
     default_signature TEXT,
     brand_voice TEXT,
+    offer_description TEXT,
+    default_target_audience TEXT,
     default_tone TEXT,
     default_cta TEXT,
     default_language TEXT DEFAULT 'en',
@@ -51,6 +53,9 @@ CREATE TABLE IF NOT EXISTS owner_settings (
     allowed_send_end TEXT DEFAULT '17:00',
     required_footer TEXT,
     banned_phrases JSONB DEFAULT '[]'::jsonb,
+    generation_worker_paused BOOLEAN DEFAULT false,
+    sending_worker_paused BOOLEAN DEFAULT false,
+    queue_drain_enabled BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );

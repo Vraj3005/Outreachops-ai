@@ -409,7 +409,7 @@ class SequenceService:
         set_res = (
             supabase.table("owner_settings")
             .select("*")
-            .eq("user_id", campaign["user_id"])
+            .eq("owner_id", campaign["user_id"])
             .execute()
         )
         sender_settings = set_res.data[0] if set_res.data else {}

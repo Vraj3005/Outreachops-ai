@@ -767,7 +767,7 @@ async def get_lead_personalization_context(
         set_res = (
             supabase.table("owner_settings")
             .select("*")
-            .eq("user_id", owner["id"])
+            .eq("owner_id", owner["id"])
             .execute()
         )
         if set_res.data:
