@@ -201,4 +201,3 @@ def delete_draft(draft_id: str) -> bool:
     except Exception as e:
         logger.error(f"Error deleting email draft {draft_id}: {e}")
         return False
-

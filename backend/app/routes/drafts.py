@@ -677,20 +677,17 @@ async def delete_draft_endpoint(
 
     draft = get_draft(id)
     if not draft or draft.get("user_id") != owner["id"]:
-        raise HTTPException(
-            status_code=404, detail=f"Draft '{id}' not found."
-        )
+        raise HTTPException(status_code=404, detail=f"Draft '{id}' not found.")
 
     # Deletion cascade for associated scheduled emails
     if supabase:
         try:
             supabase.table("scheduled_emails").delete().eq("draft_id", id).execute()
         except Exception as e:
-            logger.warning(f"Could not delete associated scheduled emails for draft {id}: {e}")
+            logger.warning(
+                f"Could not delete associated scheduled emails for draft {id}: {e}"
+            )
 
     success = delete_draft(id)
     if not success:
-        raise HTTPException(
-            status_code=500, detail="Failed to delete draft."
-        )
-
+        raise HTTPException(status_code=500, detail="Failed to delete draft.")

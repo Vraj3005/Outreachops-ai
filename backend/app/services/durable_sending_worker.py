@@ -215,10 +215,13 @@ class DurableSendingWorker:
             # 3. Guardrail Validations
             ok, fail_reason = cls._check_guardrails(job, campaign, lead, draft)
             if not ok:
-                if fail_reason and ("allowed sending hours window" in fail_reason or "Weekend sending is excluded" in fail_reason):
+                if fail_reason and (
+                    "allowed sending hours window" in fail_reason
+                    or "Weekend sending is excluded" in fail_reason
+                ):
                     # Timing restriction. Calculate the next valid send time
                     from app.services.sequence_service import SequenceService
-                    
+
                     next_valid_time = SequenceService.calculate_next_send_time(
                         from_utc_dt=datetime.datetime.now(datetime.UTC),
                         delay_amount=0,
@@ -228,23 +231,31 @@ class DurableSendingWorker:
                         window_end_str=campaign.get("sending_window_end", "17:00"),
                         exclude_weekends=bool(campaign.get("exclude_weekends", 1)),
                     )
-                    
-                    # Update scheduled email back to pending but for the future valid time
-                    supabase.table("scheduled_emails").update({
-                        "status": "pending",
-                        "last_error": fail_reason,
-                        "scheduled_for": next_valid_time.isoformat(),
-                        "updated_at": datetime.datetime.now(datetime.UTC).isoformat(),
-                    }).eq("id", job["id"]).execute()
-                    
-                    # Re-schedule campaign lead step timing
-                    supabase.table("campaign_leads").update({
-                        "status": "scheduled",
-                        "next_step_scheduled_at": next_valid_time.isoformat(),
-                        "last_error": fail_reason,
-                    }).eq("campaign_id", campaign_id).eq("lead_id", lead_id).execute()
 
-                    logger.info(f"Job {job['id']} outside sending window. Postponed until {next_valid_time.isoformat()}.")
+                    # Update scheduled email back to pending but for the future valid time
+                    supabase.table("scheduled_emails").update(
+                        {
+                            "status": "pending",
+                            "last_error": fail_reason,
+                            "scheduled_for": next_valid_time.isoformat(),
+                            "updated_at": datetime.datetime.now(
+                                datetime.UTC
+                            ).isoformat(),
+                        }
+                    ).eq("id", job["id"]).execute()
+
+                    # Re-schedule campaign lead step timing
+                    supabase.table("campaign_leads").update(
+                        {
+                            "status": "scheduled",
+                            "next_step_scheduled_at": next_valid_time.isoformat(),
+                            "last_error": fail_reason,
+                        }
+                    ).eq("campaign_id", campaign_id).eq("lead_id", lead_id).execute()
+
+                    logger.info(
+                        f"Job {job['id']} outside sending window. Postponed until {next_valid_time.isoformat()}."
+                    )
                     return
 
                 # Permanent failure
