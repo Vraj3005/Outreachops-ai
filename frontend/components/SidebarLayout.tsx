@@ -208,10 +208,8 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
     
     if (isSuccess) {
       return {
-        wrapper: defaultType === "gemini" 
-          ? "text-indigo-700 bg-indigo-50 border-indigo-100" 
-          : "text-emerald-700 bg-emerald-50 border-emerald-100",
-        dot: defaultType === "gemini" ? "bg-indigo-500" : "bg-emerald-500"
+        wrapper: "text-emerald-700 bg-emerald-50 border-emerald-100",
+        dot: "bg-emerald-500"
       };
     } else if (isWarning) {
       return {
@@ -361,25 +359,25 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
             </button>
             
             <span className="text-xs text-zinc-400 font-mono hidden sm:inline">Diagnostics:</span>
-            <div className="flex flex-wrap items-center gap-1.5 text-[9px] sm:text-[10px] font-semibold">
+            <div className="flex flex-wrap items-center gap-3 text-[10px] font-semibold">
               {/* Database Status */}
-              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(dbStatus, "db").wrapper}`}>
-                <span className={`h-1 w-1 rounded-full ${getStatusClasses(dbStatus, "db").dot}`}></span>
-                DB Link
+              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(dbStatus, "db").wrapper}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(dbStatus, "db").dot}`}></span>
+                Database
               </div>
               {/* Gmail status */}
-              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(gmailStatus, "gmail").wrapper}`}>
-                <span className={`h-1 w-1 rounded-full ${getStatusClasses(gmailStatus, "gmail").dot}`}></span>
+              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(gmailStatus, "gmail").wrapper}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(gmailStatus, "gmail").dot}`}></span>
                 Gmail API
               </div>
               {/* Sheets status */}
-              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(sheetsStatus, "sheets").wrapper}`}>
-                <span className={`h-1 w-1 rounded-full ${getStatusClasses(sheetsStatus, "sheets").dot}`}></span>
+              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(sheetsStatus, "sheets").wrapper}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(sheetsStatus, "sheets").dot}`}></span>
                 Sheets Sync
               </div>
               {/* Gemini status */}
-              <div className={`flex items-center gap-1 px-1.5 py-0.5 rounded-full border ${getStatusClasses(geminiStatus, "gemini").wrapper}`}>
-                <span className={`h-1 w-1 rounded-full ${getStatusClasses(geminiStatus, "gemini").dot}`}></span>
+              <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full border ${getStatusClasses(geminiStatus, "gemini").wrapper}`}>
+                <span className={`h-1.5 w-1.5 rounded-full ${getStatusClasses(geminiStatus, "gemini").dot}`}></span>
                 Gemini API
               </div>
             </div>
