@@ -13,13 +13,23 @@ logger = logging.getLogger("outreachops.routes.health")
 
 router = APIRouter(prefix="/health", tags=["health"])
 
+# Simple in-memory cache for the basic health check (30s TTL)
+_health_cache: dict | None = None
+_health_cache_expiry: float = 0
+
 
 @router.get("")
 async def health_check():
     """
     Diagnostic dashboard check verifying API runtime and Supabase connection states.
     Publicly accessible, returning generic indicator without exposing internal errors.
+    Cached for 30 seconds to reduce database load from repeated checks.
     """
+    global _health_cache, _health_cache_expiry
+
+    if _health_cache and time.time() < _health_cache_expiry:
+        return _health_cache
+
     db_status = "unconfigured"
 
     if supabase:
@@ -32,12 +42,17 @@ async def health_check():
 
     overall_status = "healthy" if db_status == "connected" else "unhealthy"
 
-    return {
+    result = {
         "status": overall_status,
         "app": "OutreachOps AI API",
         "version": "1.0.0",
         "database": db_status,
     }
+
+    _health_cache = result
+    _health_cache_expiry = time.time() + 30  # 30 second TTL
+
+    return result
 
 
 @router.get("/diagnostics")

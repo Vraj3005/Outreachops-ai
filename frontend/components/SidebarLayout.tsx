@@ -113,49 +113,18 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
         }
       }
       
-      // Gmail status
-      try {
-        const res = await fetch(`${API_URL}/api/v1/integrations/gmail/status`);
-        if (res.ok) {
-          const data = await res.json();
-          fetchedGmail = data.status || "disconnected";
-        }
-      } catch (e) {
-        // ignore
-      }
+      // Fire all diagnostic checks in parallel for speed
+      const [gmailResult, sheetsResult, geminiResult, dbResult] = await Promise.allSettled([
+        fetch(`${API_URL}/api/v1/integrations/gmail/status`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_URL}/api/v1/integrations/sheets/status`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_URL}/api/v1/integrations/gemini/status`).then(r => r.ok ? r.json() : null),
+        fetch(`${API_URL}/api/v1/health`).then(r => r.ok ? r.json() : null),
+      ]);
 
-      // Sheets status
-      try {
-        const res = await fetch(`${API_URL}/api/v1/integrations/sheets/status`);
-        if (res.ok) {
-          const data = await res.json();
-          fetchedSheets = data.status || "unconfigured";
-        }
-      } catch (e) {
-        // ignore
-      }
-
-      // Gemini status
-      try {
-        const res = await fetch(`${API_URL}/api/v1/integrations/gemini/status`);
-        if (res.ok) {
-          const data = await res.json();
-          fetchedGemini = data.status || "unconfigured";
-        }
-      } catch (e) {
-        // ignore
-      }
-
-      // Database health
-      try {
-        const res = await fetch(`${API_URL}/api/v1/health`);
-        if (res.ok) {
-          const data = await res.json();
-          fetchedDb = data.database || "failed";
-        }
-      } catch (e) {
-        // ignore
-      }
+      if (gmailResult.status === "fulfilled" && gmailResult.value) fetchedGmail = gmailResult.value.status || "disconnected";
+      if (sheetsResult.status === "fulfilled" && sheetsResult.value) fetchedSheets = sheetsResult.value.status || "unconfigured";
+      if (geminiResult.status === "fulfilled" && geminiResult.value) fetchedGemini = geminiResult.value.status || "unconfigured";
+      if (dbResult.status === "fulfilled" && dbResult.value) fetchedDb = dbResult.value.database || "failed";
 
       // Update state
       setGmailStatus(fetchedGmail);
@@ -347,8 +316,8 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
       </aside>
 
       {/* Main Workspace Frame */}
-      <div className="flex-1 flex flex-col min-w-0 overflow-y-auto">
-        <header className="h-16 border-b border-zinc-200 px-4 md:px-8 flex items-center justify-between bg-white/80 backdrop-blur-md sticky top-0 z-10">
+      <div className="flex-1 flex flex-col min-w-0 h-full">
+        <header className="h-16 shrink-0 border-b border-zinc-200 px-4 md:px-8 flex items-center justify-between bg-white z-10">
           <div className="flex items-center gap-3">
             {/* Mobile Menu Trigger */}
             <button 
@@ -392,7 +361,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
           </div>
         </header>
 
-        <main className="p-4 md:p-8">
+        <main className="flex-1 overflow-y-auto p-4 md:p-8">
           <div className="max-w-7xl mx-auto space-y-8 animate-fade-in">
             {children}
           </div>

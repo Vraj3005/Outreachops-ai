@@ -117,8 +117,8 @@ export default function QueuePage() {
 
   useEffect(() => {
     fetchQueueAndHealth();
-    // Poll every 5 seconds for live status changes
-    const interval = setInterval(fetchQueueAndHealth, 5000);
+    // Poll every 15 seconds for live status changes (diagnostics endpoint is heavy)
+    const interval = setInterval(fetchQueueAndHealth, 15000);
     return () => clearInterval(interval);
   }, []);
 

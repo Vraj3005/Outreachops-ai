@@ -66,8 +66,14 @@ export default function DraftsPage() {
   const fetchDraftsAndLeads = useCallback(async () => {
     setLoading(true);
     try {
-      // 1. Fetch leads map to resolve company names
-      const leadsRes = await fetch(`${API_URL}/api/v1/leads`);
+      // Fire all 3 API calls in parallel for speed
+      const [leadsRes, campRes, draftsRes] = await Promise.all([
+        fetch(`${API_URL}/api/v1/leads`),
+        fetch(`${API_URL}/api/v1/campaigns`),
+        fetch(`${API_URL}/api/v1/drafts`),
+      ]);
+
+      // 1. Build leads map
       let leadsMap: Record<string, Lead> = {};
       if (leadsRes.ok) {
         const leadsData: Lead[] = await leadsRes.json();
@@ -76,8 +82,7 @@ export default function DraftsPage() {
         });
       }
 
-      // 2. Fetch campaigns list to map campaign names
-      const campRes = await fetch(`${API_URL}/api/v1/campaigns`);
+      // 2. Build campaigns map
       let campaignsMap: Record<string, any> = {};
       if (campRes.ok) {
         const campData = await campRes.json();
@@ -86,8 +91,7 @@ export default function DraftsPage() {
         });
       }
 
-      // 3. Fetch all drafts
-      const draftsRes = await fetch(`${API_URL}/api/v1/drafts`);
+      // 3. Resolve drafts with lead/campaign details
       if (draftsRes.ok) {
         const draftsData: any[] = await draftsRes.json();
         
