@@ -244,7 +244,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
           {/* Logo / Header */}
           <div className="flex items-center justify-between mb-8">
             <div className="flex items-center gap-2 cursor-pointer" onClick={() => { router.push("/dashboard"); if (isMobile) setIsMobileOpen(false); }}>
-              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center shadow-md shadow-indigo-100 hover:scale-105 transition-transform">
+              <div className="w-7 h-7 rounded-lg bg-zinc-900 flex items-center justify-center shadow-sm hover:scale-105 transition-transform">
                 <Sparkles className="w-3.5 h-3.5 text-white" />
               </div>
               {!collapsed && (
@@ -271,12 +271,12 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
                    onClick={() => { router.push(item.path); if (isMobile) setIsMobileOpen(false); }}
                    className={`w-full flex items-center ${collapsed ? "justify-center px-1 py-2.5" : "gap-3 px-3 py-2"} rounded-lg font-medium text-xs transition-all ${
                      isActive 
-                       ? "bg-indigo-50 text-indigo-700 font-semibold border border-indigo-100/50 shadow-sm" 
+                       ? "bg-zinc-100 text-zinc-900 font-semibold border border-zinc-200/50 shadow-sm" 
                        : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50/80"
                    }`}
                    title={collapsed ? item.name : undefined}
                 >
-                  <Icon className={`w-4 h-4 ${isActive ? "text-indigo-600" : "text-zinc-400"}`} />
+                  <Icon className={`w-4 h-4 ${isActive ? "text-zinc-900" : "text-zinc-400"}`} />
                   {!collapsed && <span>{item.name}</span>}
                 </button>
               );
@@ -305,9 +305,9 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
           {/* Collapse button - only for desktop layout */}
           {!isMobile && (
             <button
-              onClick={toggleCollapse}
-              className="w-full flex items-center justify-center p-2 rounded-lg border border-zinc-200 hover:bg-zinc-50 text-zinc-400 hover:text-zinc-700 transition-all text-[10px]"
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+               onClick={toggleCollapse}
+               className="w-full flex items-center justify-center p-2 rounded-lg border border-zinc-200 hover:bg-zinc-50 text-zinc-400 hover:text-zinc-700 transition-all text-[10px]"
+               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
               {collapsed ? <ChevronRight className="w-4 h-4" /> : <div className="flex items-center gap-1.5"><ChevronLeft className="w-3.5 h-3.5" /> <span>Collapse Menu</span></div>}
             </button>
@@ -320,7 +320,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   if (checkingAuth) {
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center font-sans">
-        <div className="flex flex-col items-center gap-3 text-indigo-600">
+        <div className="flex flex-col items-center gap-3 text-zinc-900">
           <RefreshCw className="w-8 h-8 animate-spin" />
           <span className="text-xs font-semibold text-zinc-600">Verifying secure owner session...</span>
         </div>
@@ -329,7 +329,7 @@ export default function SidebarLayout({ children }: SidebarLayoutProps) {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50/50 text-zinc-950 flex font-sans">
+    <div className="h-screen w-screen overflow-hidden bg-zinc-50/50 text-zinc-950 flex font-sans">
       {/* Mobile sidebar drawer overlay */}
       {isMobileOpen && (
         <div 
