@@ -6,7 +6,7 @@ import { useToast } from "@/components/Toast";
 import { 
   Mail, Sparkles, RefreshCw, CheckCircle2, XCircle, 
   Edit3, Send, Save, AlertCircle, X, ExternalLink,
-  Square, CheckSquare, ShieldAlert
+  Square, CheckSquare, ShieldAlert, Trash2
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -255,6 +255,22 @@ export default function DraftsPage() {
         fetchDraftsAndLeads();
       } else {
         toast("Failed to reject draft", "error");
+      }
+    } catch (e) {
+      console.error("API Connection Error: ", e);
+      toast("Error connecting to API", "error");
+    }
+  };
+
+  const handleDeleteDraft = async (id: string) => {
+    if (!confirm("Are you sure you want to delete this email draft? This will permanently remove the draft copy and cancel any pending queue items associated with it.")) return;
+    try {
+      const res = await fetch(`${API_URL}/api/v1/drafts/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        toast("Draft deleted successfully");
+        fetchDraftsAndLeads();
+      } else {
+        toast("Failed to delete draft", "error");
       }
     } catch (e) {
       console.error("API Connection Error: ", e);
@@ -619,6 +635,15 @@ export default function DraftsPage() {
                       >
                         {regeneratingId === draft.id ? <RefreshCw className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3 text-indigo-500" />}
                         Regenerate
+                      </button>
+
+                      <button 
+                        onClick={() => handleDeleteDraft(draft.id)}
+                        disabled={draft.status === "sent"}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-white hover:bg-zinc-50 hover:text-rose-600 disabled:opacity-40 text-zinc-500 hover:border-rose-200 border border-zinc-200 rounded-lg text-[10px] font-semibold transition-all shadow-sm"
+                        title="Delete draft copy permanently"
+                      >
+                        <Trash2 className="w-3 h-3" /> Delete
                       </button>
 
                       {/* Refinement Actions */}

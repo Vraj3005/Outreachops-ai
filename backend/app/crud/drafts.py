@@ -190,3 +190,15 @@ def reject_draft(draft_id: str) -> dict[str, Any] | None:
     except Exception as e:
         logger.error(f"Error rejecting email draft {draft_id}: {e}")
         return None
+
+
+def delete_draft(draft_id: str) -> bool:
+    if not supabase:
+        return False
+    try:
+        res = supabase.table("email_drafts").delete().eq("id", draft_id).execute()
+        return len(res.data) > 0
+    except Exception as e:
+        logger.error(f"Error deleting email draft {draft_id}: {e}")
+        return False
+

@@ -663,3 +663,34 @@ async def send_draft_endpoint(
         raise HTTPException(
             status_code=500, detail=f"Gmail API transmission failed: {err_msg}"
         )
+
+
+@router.delete("/{id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_draft_endpoint(
+    id: str = Path(..., description="The unique UUID of the email draft to delete"),
+    owner: dict = Depends(require_owner),
+):
+    """
+    Deletes an email draft from the database, cascading deletion to associated scheduled emails.
+    """
+    from app.crud.drafts import delete_draft, get_draft
+
+    draft = get_draft(id)
+    if not draft or draft.get("user_id") != owner["id"]:
+        raise HTTPException(
+            status_code=404, detail=f"Draft '{id}' not found."
+        )
+
+    # Deletion cascade for associated scheduled emails
+    if supabase:
+        try:
+            supabase.table("scheduled_emails").delete().eq("draft_id", id).execute()
+        except Exception as e:
+            logger.warning(f"Could not delete associated scheduled emails for draft {id}: {e}")
+
+    success = delete_draft(id)
+    if not success:
+        raise HTTPException(
+            status_code=500, detail="Failed to delete draft."
+        )
+
