@@ -8,7 +8,7 @@ import {
   Clock, RefreshCw, AlertTriangle, CheckCircle, 
   XCircle, RotateCcw, Ban, Activity, Filter,
   Play, Pause, Cpu, Database, AlertCircle, ShieldAlert,
-  Trash2
+  Trash2, Calendar, Zap, X, Square, CheckSquare
 } from "lucide-react";
 
 interface ScheduledEmail {
@@ -46,6 +46,82 @@ export default function QueuePage() {
   const [controlsLoading, setControlsLoading] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const { toast } = useToast();
+
+  // Selection and Rescheduling states
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showRescheduleModal, setShowRescheduleModal] = useState(false);
+  const [rescheduleStrategy, setRescheduleStrategy] = useState<"staggered" | "immediate" | "delayed">("staggered");
+  const [rescheduleInterval, setRescheduleInterval] = useState(1);
+  const [rescheduleDelay, setRescheduleDelay] = useState(5);
+  const [rescheduleStartTime, setRescheduleStartTime] = useState("");
+  const [rescheduleTarget, setRescheduleTarget] = useState<"selected" | "all">("selected");
+
+  const handleToggleSelectRow = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleSelectAll = (filteredQueue: ScheduledEmail[]) => {
+    const selectable = filteredQueue.filter(item => item.status === "pending" || item.status === "retry" || item.status === "failed");
+    if (selectedIds.size === selectable.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(selectable.map(item => item.id)));
+    }
+  };
+
+  const handleBulkReschedule = async () => {
+    const idsToReschedule = rescheduleTarget === "selected" 
+      ? Array.from(selectedIds) 
+      : queue.filter(item => item.status === "pending" || item.status === "retry" || item.status === "failed").map(item => item.id);
+
+    if (idsToReschedule.length === 0) {
+      toast("No eligible queue items to reschedule.", "error");
+      return;
+    }
+
+    setActionLoading("bulk-reschedule");
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${API_URL}/api/v1/emails/queue/bulk-reschedule`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          queue_ids: idsToReschedule,
+          strategy: rescheduleStrategy,
+          start_time_iso: rescheduleStartTime || null,
+          stagger_interval_minutes: rescheduleInterval,
+          delay_minutes: rescheduleDelay
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        toast(data.message || `Successfully rescheduled ${idsToReschedule.length} emails.`, "success");
+        setShowRescheduleModal(false);
+        setSelectedIds(new Set());
+        fetchQueueAndHealth();
+      } else {
+        const err = await res.json();
+        toast(err.detail || "Failed to bulk reschedule.", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Connection error during bulk reschedule.", "error");
+    } finally {
+      setActionLoading(null);
+    }
+  };
 
   const getAuthToken = async (): Promise<string> => {
     let token = "mock-owner-token"; // Default for demo mode bypass
@@ -280,13 +356,26 @@ export default function QueuePage() {
           <h2 className="text-lg font-bold text-zinc-950 tracking-tight">Outbox & Worker Control Dashboard</h2>
           <p className="text-xs text-zinc-500">Monitor queue depth, pause/resume processes, and view real-time engine diagnostics</p>
         </div>
-        <button 
-          onClick={fetchQueueAndHealth}
-          disabled={loading}
-          className="p-2 rounded bg-white border border-zinc-200 text-zinc-400 hover:text-zinc-600 transition-colors shadow-sm"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => {
+              setRescheduleTarget("all");
+              setShowRescheduleModal(true);
+            }}
+            className="px-3 py-2 bg-zinc-900 hover:bg-zinc-800 text-white rounded text-xs font-bold flex items-center gap-1 transition-all shadow-sm"
+            title="Bulk reschedule all pending/failed items"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Reschedule All
+          </button>
+          <button 
+            onClick={fetchQueueAndHealth}
+            disabled={loading}
+            className="p-2 rounded bg-white border border-zinc-200 text-zinc-400 hover:text-zinc-600 transition-colors shadow-sm"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
@@ -329,6 +418,19 @@ export default function QueuePage() {
                 <table className="w-full text-left text-xs border-collapse">
                   <thead>
                     <tr className="bg-zinc-50 border-b border-zinc-100 text-zinc-400 font-bold uppercase text-[9px] tracking-wider">
+                      <th className="p-4 w-10">
+                        <button
+                          type="button"
+                          onClick={() => handleToggleSelectAll(filteredQueue)}
+                          className="text-zinc-400 hover:text-zinc-650 transition-colors"
+                        >
+                          {selectedIds.size > 0 && selectedIds.size === filteredQueue.filter(item => item.status === "pending" || item.status === "retry" || item.status === "failed").length ? (
+                            <CheckSquare className="w-4 h-4 text-zinc-900" />
+                          ) : (
+                            <Square className="w-4 h-4" />
+                          )}
+                        </button>
+                      </th>
                       <th className="p-4">Lead / Campaign</th>
                       <th className="p-4">Step</th>
                       <th className="p-4">Scheduled For</th>
@@ -340,6 +442,20 @@ export default function QueuePage() {
                   <tbody className="divide-y divide-zinc-100">
                     {filteredQueue.map((item) => (
                       <tr key={item.id} className="hover:bg-zinc-50/50 transition-colors">
+                        <td className="p-4">
+                          <button
+                            type="button"
+                            onClick={() => handleToggleSelectRow(item.id)}
+                            disabled={!(item.status === "pending" || item.status === "retry" || item.status === "failed")}
+                            className="text-zinc-400 hover:text-zinc-650 transition-colors disabled:opacity-30"
+                          >
+                            {selectedIds.has(item.id) ? (
+                              <CheckSquare className="w-4 h-4 text-zinc-900" />
+                            ) : (
+                              <Square className="w-4 h-4" />
+                            )}
+                          </button>
+                        </td>
                         <td className="p-4 space-y-0.5">
                           <div className="font-bold text-zinc-900 truncate max-w-[150px]" title={item.lead_id}>
                             {item.lead_id}
@@ -633,6 +749,144 @@ export default function QueuePage() {
         </div>
 
       </div>
+
+      {/* Floating Bulk Action Bar */}
+      {selectedIds.size > 0 && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-md border border-zinc-200/80 px-6 py-3 rounded-full shadow-xl z-30 flex items-center gap-4 animate-fade-in text-xs font-semibold text-zinc-800">
+          <span>{selectedIds.size} items selected</span>
+          <div className="h-4 w-px bg-zinc-200" />
+          <button
+            onClick={() => {
+              setRescheduleTarget("selected");
+              setShowRescheduleModal(true);
+            }}
+            className="px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white rounded-full font-bold flex items-center gap-1 transition-all"
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            Custom Reschedule
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="text-zinc-500 hover:text-zinc-800"
+          >
+            Clear Selection
+          </button>
+        </div>
+      )}
+
+      {/* Reschedule Modal */}
+      {showRescheduleModal && (
+        <div className="fixed inset-0 bg-zinc-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-zinc-200 shadow-2xl overflow-hidden animate-fade-in text-left">
+            <div className="p-6 border-b border-zinc-100 flex justify-between items-center">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-950">Bulk Custom Reschedule</h3>
+                <p className="text-[10px] text-zinc-500">Stagger, delay, or send queue items immediately.</p>
+              </div>
+              <button 
+                onClick={() => setShowRescheduleModal(false)}
+                className="text-zinc-400 hover:text-zinc-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4 text-xs font-medium text-zinc-700">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-zinc-400 block mb-1.5">Reschedule Strategy</span>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setRescheduleStrategy("staggered")}
+                    className={`py-2 px-3 rounded-lg border text-center font-bold transition-all ${rescheduleStrategy === "staggered" ? "border-zinc-950 bg-zinc-50 text-zinc-950" : "border-zinc-200 hover:bg-zinc-50 text-zinc-500"}`}
+                  >
+                    Staggered
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRescheduleStrategy("immediate")}
+                    className={`py-2 px-3 rounded-lg border text-center font-bold transition-all ${rescheduleStrategy === "immediate" ? "border-zinc-950 bg-zinc-50 text-zinc-950" : "border-zinc-200 hover:bg-zinc-50 text-zinc-500"}`}
+                  >
+                    Immediate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRescheduleStrategy("delayed")}
+                    className={`py-2 px-3 rounded-lg border text-center font-bold transition-all ${rescheduleStrategy === "delayed" ? "border-zinc-950 bg-zinc-50 text-zinc-950" : "border-zinc-200 hover:bg-zinc-50 text-zinc-500"}`}
+                  >
+                    Delay Offset
+                  </button>
+                </div>
+              </div>
+
+              {rescheduleStrategy === "staggered" && (
+                <div className="space-y-3 p-3 bg-zinc-50 rounded-xl border border-zinc-100">
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Starting Time (UTC/Local ISO)</label>
+                    <input
+                      type="text"
+                      value={rescheduleStartTime}
+                      onChange={e => setRescheduleStartTime(e.target.value)}
+                      placeholder="e.g. 2026-07-16T15:00:00 (Blank for Now)"
+                      className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-mono bg-white text-zinc-800 focus:outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Interval Spacing (Minutes)</label>
+                    <input
+                      type="number"
+                      value={rescheduleInterval}
+                      onChange={e => setRescheduleInterval(parseInt(e.target.value) || 1)}
+                      min={1}
+                      className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-mono bg-white text-zinc-800 focus:outline-none"
+                    />
+                    <span className="text-[9px] text-zinc-400 block mt-1">Emails will be scheduled at {rescheduleInterval}-minute intervals from start time.</span>
+                  </div>
+                </div>
+              )}
+
+              {rescheduleStrategy === "delayed" && (
+                <div className="space-y-3 p-3 bg-zinc-50 rounded-xl border border-zinc-100">
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-zinc-400 block mb-1">Delay Duration (Minutes)</label>
+                    <input
+                      type="number"
+                      value={rescheduleDelay}
+                      onChange={e => setRescheduleDelay(parseInt(e.target.value) || 0)}
+                      min={1}
+                      className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-mono bg-white text-zinc-800 focus:outline-none"
+                    />
+                    <span className="text-[9px] text-zinc-400 block mt-1">Emails will be offset by {rescheduleDelay} minutes from now.</span>
+                  </div>
+                </div>
+              )}
+
+              {rescheduleStrategy === "immediate" && (
+                <div className="p-3 bg-zinc-50 rounded-xl border border-zinc-100 text-[10px] text-zinc-500 font-medium">
+                  Queue items will be marked as pending with a schedule date set to &quot;Now&quot; and attempts set to 0. They will dispatch on the next worker run ticks.
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 bg-zinc-50 border-t border-zinc-100 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowRescheduleModal(false)}
+                className="px-4 py-2 border border-zinc-200 hover:bg-zinc-100 text-zinc-700 rounded-lg text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleBulkReschedule}
+                className="px-4 py-2 bg-zinc-950 hover:bg-zinc-850 text-white rounded-lg text-xs font-bold font-sans"
+              >
+                Apply Reschedule
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </SidebarLayout>
   );
 }

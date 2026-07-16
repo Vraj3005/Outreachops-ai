@@ -280,3 +280,111 @@ async def get_sending_worker_health(owner: dict = Depends(require_owner)):
     from app.services.durable_sending_worker import DurableSendingWorker
 
     return DurableSendingWorker.get_health_status()
+
+
+from pydantic import BaseModel, Field
+
+
+class BulkRescheduleRequest(BaseModel):
+    queue_ids: list[str] = Field(
+        ..., description="List of scheduled email UUIDs to reschedule"
+    )
+    strategy: str = Field(
+        ...,
+        description="reschedule strategy: immediate, staggered, or delayed",
+    )
+    start_time_iso: str | None = Field(
+        None, description="Starting time ISO string, defaults to now"
+    )
+    stagger_interval_minutes: int = Field(
+        1, description="Interval in minutes between staggered emails"
+    )
+    delay_minutes: int = Field(0, description="Delay in minutes for delayed strategy")
+
+
+@router.post("/queue/bulk-reschedule")
+async def bulk_reschedule_emails(
+    payload: BulkRescheduleRequest,
+    owner: dict = Depends(require_owner),
+):
+    """
+    Reschedules multiple outbox items using immediate, staggered, or delayed strategy.
+    """
+    try:
+        # Check ownership and retrieve existing queue records
+        jobs_res = (
+            supabase.table("scheduled_emails")
+            .select("*")
+            .in_("id", payload.queue_ids)
+            .eq("user_id", owner["id"])
+            .execute()
+        )
+        jobs = jobs_res.data or []
+        if not jobs:
+            return {
+                "status": "success",
+                "message": "No matching scheduled emails found.",
+                "count": 0,
+            }
+
+        # Parse start time
+        if payload.start_time_iso:
+            try:
+                base_time = datetime.datetime.fromisoformat(
+                    payload.start_time_iso.replace("Z", "+00:00")
+                )
+            except Exception:
+                base_time = datetime.datetime.now(datetime.UTC)
+        else:
+            base_time = datetime.datetime.now(datetime.UTC)
+
+        updated_count = 0
+        for i, job in enumerate(jobs):
+            # Calculate scheduled time based on strategy
+            if payload.strategy == "immediate":
+                sched_time = datetime.datetime.now(datetime.UTC)
+            elif payload.strategy == "delayed":
+                sched_time = base_time + datetime.timedelta(
+                    minutes=payload.delay_minutes
+                )
+            elif payload.strategy == "staggered":
+                sched_time = base_time + datetime.timedelta(
+                    minutes=i * payload.stagger_interval_minutes
+                )
+            else:
+                sched_time = base_time
+
+            sched_time_str = sched_time.isoformat()
+
+            # Update scheduled email back to pending status
+            supabase.table("scheduled_emails").update(
+                {
+                    "status": "pending",
+                    "attempts": 0,
+                    "last_error": None,
+                    "scheduled_for": sched_time_str,
+                    "updated_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                }
+            ).eq("id", job["id"]).execute()
+
+            # Also sync campaign_leads next step schedule
+            if job.get("campaign_id") and job.get("lead_id"):
+                supabase.table("campaign_leads").update(
+                    {
+                        "status": "scheduled",
+                        "next_step_scheduled_at": sched_time_str,
+                        "last_error": None,
+                    }
+                ).eq("campaign_id", job["campaign_id"]).eq(
+                    "lead_id", job["lead_id"]
+                ).execute()
+
+            updated_count += 1
+
+        return {
+            "status": "success",
+            "message": f"Successfully rescheduled {updated_count} emails.",
+            "count": updated_count,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
