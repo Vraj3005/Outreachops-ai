@@ -56,6 +56,48 @@ export default function QueuePage() {
   const [rescheduleStartTime, setRescheduleStartTime] = useState("");
   const [rescheduleTarget, setRescheduleTarget] = useState<"selected" | "all">("selected");
 
+  // Active campaign timing states
+  const [activeCampaign, setActiveCampaign] = useState<any>(null);
+  const [campTimezone, setCampTimezone] = useState("UTC");
+  const [campWindowStart, setCampWindowStart] = useState("09:00");
+  const [campWindowEnd, setCampWindowEnd] = useState("17:00");
+  const [campExcludeWeekends, setCampExcludeWeekends] = useState(true);
+  const [savingCampSettings, setSavingCampSettings] = useState(false);
+
+  const handleSaveCampaignTiming = async () => {
+    if (!activeCampaign) return;
+    setSavingCampSettings(true);
+    try {
+      const token = await getAuthToken();
+      const res = await fetch(`${API_URL}/api/v1/campaigns/${activeCampaign.id}`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          timezone: campTimezone,
+          sending_window_start: campWindowStart,
+          sending_window_end: campWindowEnd,
+          exclude_weekends: campExcludeWeekends
+        })
+      });
+
+      if (res.ok) {
+        toast("Campaign sending window updated successfully!", "success");
+        fetchQueueAndHealth();
+      } else {
+        const err = await res.json();
+        toast(err.detail || "Failed to update campaign window.", "error");
+      }
+    } catch (e) {
+      console.error(e);
+      toast("Connection error saving campaign timing.", "error");
+    } finally {
+      setSavingCampSettings(false);
+    }
+  };
+
   const handleToggleSelectRow = (id: string) => {
     setSelectedIds(prev => {
       const next = new Set(prev);
@@ -173,7 +215,6 @@ export default function QueuePage() {
         const diagData = await diagRes.json();
         setDiagnostics(diagData);
         setHealth(diagData.workers.sending_worker);
-      } else {
         // Fallback to simple health endpoint if diagnostics is not authorized
         const hRes = await fetch(`${API_URL}/api/v1/emails/worker-health`, { headers });
         if (hRes.ok) {
@@ -181,6 +222,19 @@ export default function QueuePage() {
           setHealth(hData);
         } else {
           setHealth({ status: "offline", reason: "API health check failed" });
+        }
+      }
+
+      // 3. Fetch Active Campaign Settings
+      const actRes = await fetch(`${API_URL}/api/v1/campaigns/active`, { headers });
+      if (actRes.ok) {
+        const actData = await actRes.json();
+        if (actData) {
+          setActiveCampaign(actData);
+          setCampTimezone(actData.timezone || "UTC");
+          setCampWindowStart(actData.sending_window_start || "09:00");
+          setCampWindowEnd(actData.sending_window_end || "17:00");
+          setCampExcludeWeekends(actData.exclude_weekends !== undefined ? !!actData.exclude_weekends : true);
         }
       }
     } catch (e) {
@@ -527,6 +581,71 @@ export default function QueuePage() {
         {/* Right 1 Column: Diagnostics Panel */}
         <div className="lg:col-span-1 space-y-6">
           
+          {/* Section: Campaign Sending Window */}
+          {activeCampaign && (
+            <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4 text-left">
+              <div>
+                <h3 className="text-xs font-extrabold text-zinc-800 uppercase tracking-wider">Campaign Allowed Hours</h3>
+                <p className="text-[10px] text-zinc-400">Active Campaign: <span className="font-bold text-zinc-700">{activeCampaign.name}</span></p>
+              </div>
+
+              <div className="space-y-3 pt-2 text-xs font-medium text-zinc-700">
+                <div>
+                  <label className="text-[9px] uppercase font-bold text-zinc-400 block mb-1">Timezone</label>
+                  <input
+                    type="text"
+                    value={campTimezone}
+                    onChange={e => setCampTimezone(e.target.value)}
+                    className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-semibold bg-zinc-50 text-zinc-850 focus:outline-none focus:border-zinc-950"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[9px] uppercase font-bold text-zinc-400 block mb-1">Allowed Start</label>
+                    <input
+                      type="text"
+                      value={campWindowStart}
+                      onChange={e => setCampWindowStart(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-mono bg-zinc-50 text-zinc-850 focus:outline-none focus:border-zinc-950"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[9px] uppercase font-bold text-zinc-400 block mb-1">Allowed End</label>
+                    <input
+                      type="text"
+                      value={campWindowEnd}
+                      onChange={e => setCampWindowEnd(e.target.value)}
+                      className="w-full px-2.5 py-1.5 rounded border border-zinc-200 text-xs font-mono bg-zinc-50 text-zinc-850 focus:outline-none focus:border-zinc-950"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <input
+                    type="checkbox"
+                    id="exclude-weekends"
+                    checked={campExcludeWeekends}
+                    onChange={e => setCampExcludeWeekends(e.target.checked)}
+                    className="rounded text-zinc-950 focus:ring-0 cursor-pointer w-3.5 h-3.5"
+                  />
+                  <label htmlFor="exclude-weekends" className="text-[10px] text-zinc-655 select-none cursor-pointer">
+                    Exclude Weekend Sending
+                  </label>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleSaveCampaignTiming}
+                  disabled={savingCampSettings}
+                  className="w-full py-2 bg-zinc-900 hover:bg-zinc-800 disabled:bg-zinc-200 disabled:text-zinc-400 text-white rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all shadow-sm font-sans"
+                >
+                  {savingCampSettings ? "Saving Settings..." : "Save Window Settings"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* Section: Operational Controls */}
           <div className="bg-white p-6 rounded-xl border border-zinc-200 shadow-[0_1px_3px_rgba(0,0,0,0.02)] space-y-4">
             <div>
