@@ -233,11 +233,12 @@ class GmailSyncService:
     ) -> tuple[str | None, str | None]:
         """Resolves lead and campaign associations by matching the Gmail thread ID."""
         try:
-            # Query send events by thread id
+            # Query scheduled_emails by thread id
             res = (
-                supabase.table("send_events")
+                supabase.table("scheduled_emails")
                 .select("lead_id, campaign_id")
                 .eq("gmail_thread_id", thread_id)
+                .eq("status", "sent")
                 .execute()
             )
 

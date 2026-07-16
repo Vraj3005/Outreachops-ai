@@ -449,12 +449,12 @@ class DurableSendingWorker:
             # Reply Threading
             # Find previous step dispatched message
             prev_events = (
-                supabase.table("send_events")
+                supabase.table("scheduled_emails")
                 .select("gmail_message_id, gmail_thread_id")
                 .eq("campaign_id", campaign["id"])
                 .eq("lead_id", lead["id"])
-                .eq("event_type", "sent")
-                .order("occurred_at", desc=True)
+                .eq("status", "sent")
+                .order("updated_at", desc=True)
                 .execute()
             )
 
@@ -525,7 +525,6 @@ class DurableSendingWorker:
                 "event_type": "sent",
                 "recipient_email": recipient,
                 "gmail_message_id": gmail_message_id,
-                "gmail_thread_id": gmail_thread_id,
                 "variant_id": draft.get("variant_id"),
                 "variant_name": draft.get("variant_name"),
                 "prompt_version_id": valid_prompt_ver_id,
